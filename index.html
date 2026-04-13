@@ -208,6 +208,10 @@ body {
   font-family: var(--sans); letter-spacing: .01em;
 }
 .task-bar:hover { box-shadow: 0 0 0 2px rgba(255,255,255,.3); z-index: 10; }
+.resize-handle { position:absolute; top:0; width:6px; height:100%; cursor:ew-resize; z-index:5; opacity:0; transition:opacity .15s; }
+.task-bar:hover .resize-handle { opacity:1; }
+.resize-handle-l { left:0; background:linear-gradient(to right,rgba(255,255,255,.4),transparent); border-radius:4px 0 0 4px; }
+.resize-handle-r { right:0; background:linear-gradient(to left,rgba(255,255,255,.4),transparent); border-radius:0 4px 4px 0; }
 .task-bar.dragging { opacity: .5; cursor: grabbing; z-index: 20; }
 .task-bar.dep-err { box-shadow: 0 0 0 2px var(--red) !important; }
 .task-bar.cascade-child { box-shadow: 0 0 0 2px var(--amber) !important; }
@@ -572,9 +576,10 @@ function toggleDayView() {
 // Returns working days (Mon-Fri) between two week indices
 function getWorkDays(startWeek, numWeeks) {
   const days = [];
+  const base = typeof DYNAMIC_START !== 'undefined' ? DYNAMIC_START : START;
   for (let w = startWeek; w < startWeek + numWeeks; w++) {
     for (let d = 0; d < 7; d++) {
-      const date = new Date(START);
+      const date = new Date(base);
       date.setDate(date.getDate() + w * 7 + d);
       const dow = date.getDay();
       if (dow >= 1 && dow <= 5) days.push({ date, week: w, dow });
@@ -1413,17 +1418,19 @@ function render() {
     // Gantt row
     const gr = document.createElement('div');
     gr.className = 'gantt-row';
-    const allDaysForGantt = allDaysCheck;
+    const allDaysForGantt = dayViewOn ? getWorkDays(viewOffset, WEEKS) : null;
     const DW = dayViewOn ? DWCheck : WW;
     const totalDayW = dayViewOn ? (allDaysCheck ? allDaysCheck.length * DWCheck : totalW) : totalW;
     gr.style.minWidth = (dayViewOn ? totalDayW : totalW) + 'px';
     gr.style.height = ROW + 'px';
     if (dayViewOn && allDaysForGantt) {
+      const todayStr2 = new Date().toDateString();
       allDaysForGantt.forEach((d, di) => {
         const gc = document.createElement('div');
         gc.className = 'gantt-cell' + (d.dow === 1 ? '' : ' shade');
         gc.style.width = DW + 'px';
         if (d.dow === 1) gc.style.borderLeft = '1px solid rgba(255,255,255,.15)';
+        if (d.date.toDateString() === todayStr2) gc.style.background = 'rgba(91,127,255,.08)';
         gr.appendChild(gc);
       });
     } else {
@@ -1464,82 +1471,118 @@ function render() {
       bar.className = 'task-bar' + (viol.has(t.id) ? ' dep-err' : '');
       let barLeft, barWidth;
       if (dayViewOn && allDaysForGantt && t.startDay !== undefined) {
-        // Map day offset to workday column index
-        let si = 0, ei = 1;
+        const base4bar = typeof DYNAMIC_START !== 'undefined' ? DYNAMIC_START : START;
+        let si = -1, ei = -1;
         allDaysForGantt.forEach((d, idx) => {
-          const offset = Math.round((d.date - START) / (24*3600*1000));
-          if (offset <= t.startDay) si = idx;
-          if (offset <= (t.endDay || t.startDay)) ei = idx + 1;
+          const dayOff = Math.round((d.date - base4bar) / (24*3600*1000));
+          if (si === -1 && dayOff >= t.startDay) si = idx;
+          if (dayOff <= (t.endDay !== undefined ? t.endDay : t.startDay)) ei = idx + 1;
         });
-        barLeft = si * DW + 2;
+        if (si === -1) si = allDaysForGantt.length; // off right edge
+        if (ei <= 0) { return; } // off left edge entirely
+        barLeft = Math.max(0, si * DW + 2);
         barWidth = Math.max(DW - 4, (ei - si) * DW - 4);
       } else {
         barLeft = (t.s - viewOffset) * WW + 2;
         barWidth = t.d * WW - 4;
       }
-      bar.style.cssText = `left:${barLeft}px;width:${barWidth}px;top:${top}px;background:${t.c};color:#fff;`;
-      bar.textContent = t.lbl;
+      bar.style.cssText = `left:${barLeft}px;width:${barWidth}px;top:${top}px;background:${t.c};color:#fff;padding:0 8px;`;
       bar.dataset.tid = t.id;
+      const lbl = document.createElement('span');
+      lbl.textContent = t.lbl;
+      lbl.style.cssText = 'pointer-events:none;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      bar.appendChild(lbl);
+      const resL = document.createElement('div'); resL.className = 'resize-handle resize-handle-l';
+      const resR = document.createElement('div'); resR.className = 'resize-handle resize-handle-r';
+      bar.appendChild(resL); bar.appendChild(resR);
 
       barPos[t.id] = { x: barLeft + barWidth / 2, y: pi * dynROW + top + 11 };
 
-      bar.addEventListener('mouseenter', e => {
+      const DWunit = dayViewOn && allDaysForGantt ? DW : WW;
+      function pxToDays(px) { return dayViewOn ? Math.round(px / DWunit) : Math.round(px / WW) * 7; }
+      function daysToWeeks(d) { return Math.round(d / 7); }
+
+      function showBarTT(e) {
         const tt = document.getElementById('tt');
-        const depNames = t.deps.map(d => { const dt = tasks.find(x => x.id === d); return dt ? dt.lbl : '?'; }).join(', ') || '—';
+        const base4tt = typeof DYNAMIC_START !== 'undefined' ? DYNAMIC_START : START;
+        const sStr = t.startDay !== undefined ? new Date(base4tt.getTime()+t.startDay*86400000).toLocaleDateString('nl-BE') : weekLabel(t.s).date;
+        const eStr = t.endDay !== undefined ? new Date(base4tt.getTime()+t.endDay*86400000).toLocaleDateString('nl-BE') : weekLabel(t.s+t.d-1).date;
+        const depNames = t.deps.map(d=>{const dt=tasks.find(x=>x.id===d);return dt?dt.lbl:'?';}).join(', ')||'—';
         tt.innerHTML = `<div class="tt-title">${t.lbl}</div>
           <div class="tt-row"><span>Project</span><span>${t.proj}</span></div>
-          <div class="tt-row"><span>Start</span><span>${t.startDay !== undefined ? new Date(START.getTime() + t.startDay*86400000).toLocaleDateString('nl-BE') : weekLabel(t.s).date}</span></div>
-          <div class="tt-row"><span>Einde</span><span>${t.endDay !== undefined ? new Date(START.getTime() + t.endDay*86400000).toLocaleDateString('nl-BE') : weekLabel(t.s+t.d-1).date}</span></div>
-          <div class="tt-row"><span>Werkdagen</span><span>${t.workdays || t.d * 5}</span></div>
-          <div class="tt-row"><span>Duur</span><span>${t.workdays ? t.workdays + ' dag' + (t.workdays !== 1 ? 'en' : '') : t.d + ' wk'}</span></div>
-          <div class="tt-row"><span>Inspanning</span><span>${Math.round(t.effortHours || 0)}u${t.effortReal ? '' : ' (~schatting)'}</span></div>
-          <div class="tt-row"><span>Voortgang</span><span>${t.progress || 0}%</span></div>
+          <div class="tt-row"><span>Start</span><span>${sStr}</span></div>
+          <div class="tt-row"><span>Einde</span><span>${eStr}</span></div>
+          <div class="tt-row"><span>Duur</span><span>${t.workdays?t.workdays+' dag'+(t.workdays!==1?'en':''):t.d+' wk'}</span></div>
+          <div class="tt-row"><span>Inspanning</span><span>${Math.round(t.effortHours||0)}u${t.effortReal?'':' (~)'}</span></div>
+          <div class="tt-row"><span>Voortgang</span><span>${t.progress||0}%</span></div>
           <div class="tt-row"><span>Afh. van</span><span>${depNames}</span></div>
-          ${viol.has(t.id) ? '<div class="tt-warn">⚠ Afhankelijkheid geschonden</div>' : ''}
-          ${changedTaskIds.has(t.id) ? '<div class="tt-cascade" style="color:var(--amber)">● Gewijzigd — nog niet opgeslagen</div>' : ''}`;
-        tt.style.display = 'block';
-        moveTT(e);
-      });
-      bar.addEventListener('mousemove', moveTT);
-      bar.addEventListener('mouseleave', () => { document.getElementById('tt').style.display = 'none'; });
+          ${viol.has(t.id)?'<div class="tt-warn">⚠ Afhankelijkheid geschonden</div>':''}
+          ${changedTaskIds.has(t.id)?'<div class="tt-cascade" style="color:var(--amber)">● Gewijzigd</div>':''}`;
+        tt.style.display='block'; moveTT(e);
+      }
+      bar.addEventListener('mouseenter', showBarTT);
+      bar.addEventListener('mousemove', e=>{if(!e.buttons)moveTT(e);});
+      bar.addEventListener('mouseleave', ()=>{document.getElementById('tt').style.display='none';});
 
-      let dx0, os;
+      // ── DRAG ──
       bar.addEventListener('mousedown', e => {
+        if (e.target===resL||e.target===resR) return;
         e.preventDefault();
-        dx0 = e.clientX; os = t.s;
+        const sx=e.clientX, origS=t.s, origSD=t.startDay, origED=t.endDay;
         bar.classList.add('dragging');
-        document.getElementById('tt').style.display = 'none';
-        let cascadeChildren = cascadeMode ? getCascadeChildren(t.id) : new Set();
-        let cascadeOrig = {};
-        cascadeChildren.forEach(cid => { const ct = tasks.find(x => x.id === cid); if (ct) cascadeOrig[cid] = ct.s; });
-
-        const onMove = ev => {
-          const unitW = dayViewOn && allDaysForGantt ? Math.max(18, Math.floor((WEEKS * WW) / allDaysForGantt.length)) : WW;
-          const rawDelta = (ev.clientX - dx0) / unitW;
-          const delta = dayViewOn ? Math.round(rawDelta / 5) : Math.round(rawDelta);
-          if (!delta) return;
-          const maxWeek = WEEKS + viewOffset + 52;
-          const newS = Math.max(0, Math.min(maxWeek - t.d, os + delta));
-          if (newS === t.s) return;
-          t.s = newS; markChanged(t.id);
-          if (t.startDay !== undefined) { t.startDay += delta * 7; t.endDay += delta * 7; }
-          if (cascadeMode) {
-            cascadeChildren.forEach(cid => {
-              const ct = tasks.find(x => x.id === cid);
-              if (ct) {
-                ct.s = Math.max(0, Math.min(maxWeek - ct.d, cascadeOrig[cid] + (newS - os)));
-                if (ct.startDay !== undefined) { ct.startDay += delta * 7; ct.endDay += delta * 7; }
-                markChanged(cid);
-              }
-            });
-          }
-          dx0 = ev.clientX; os = newS;
-          if (cascadeMode) cascadeChildren.forEach(cid => { const ct = tasks.find(x => x.id === cid); if (ct) cascadeOrig[cid] = ct.s; });
+        document.getElementById('tt').style.display='none';
+        const cc=cascadeMode?getCascadeChildren(t.id):new Set();
+        const cOrigS={},cOrigSD={},cOrigED={};
+        cc.forEach(cid=>{const ct=tasks.find(x=>x.id===cid);if(ct){cOrigS[cid]=ct.s;cOrigSD[cid]=ct.startDay;cOrigED[cid]=ct.endDay;}});
+        const onMove=ev=>{
+          const dd=pxToDays(ev.clientX-sx); if(!dd) return;
+          const wd=daysToWeeks(dd);
+          t.s=Math.max(0,origS+wd);
+          if(t.startDay!==undefined){t.startDay=origSD+dd;t.endDay=origED+dd;}
+          markChanged(t.id);
+          if(cascadeMode)cc.forEach(cid=>{const ct=tasks.find(x=>x.id===cid);if(!ct)return;ct.s=Math.max(0,(cOrigS[cid]||0)+wd);if(ct.startDay!==undefined){ct.startDay=(cOrigSD[cid]||0)+dd;ct.endDay=(cOrigED[cid]||0)+dd;}markChanged(cid);});
           render();
         };
-        const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
-        document.addEventListener('mousemove', onMove);
-        document.addEventListener('mouseup', onUp);
+        const onUp=()=>{bar.classList.remove('dragging');document.removeEventListener('mousemove',onMove);document.removeEventListener('mouseup',onUp);};
+        document.addEventListener('mousemove',onMove);document.addEventListener('mouseup',onUp);
+      });
+
+      // ── RESIZE LEFT (start date) ──
+      resL.addEventListener('mousedown', e=>{
+        e.preventDefault();e.stopPropagation();
+        const sx=e.clientX,origS=t.s,origD=t.d,origSD=t.startDay,origWD=t.workdays||t.d*5;
+        document.getElementById('tt').style.display='none';
+        const onMove=ev=>{
+          const dd=pxToDays(ev.clientX-sx); if(!dd) return;
+          const wd=daysToWeeks(dd);
+          t.d=Math.max(1,origD-wd); t.s=Math.max(0,origS+wd);
+          if(t.startDay!==undefined)t.startDay=origSD+dd;
+          t.workdays=Math.max(1,origWD-dd);
+          markChanged(t.id);
+          if(cascadeMode&&wd>0)getCascadeChildren(t.id).forEach(cid=>{const ct=tasks.find(x=>x.id===cid);if(ct){ct.s=Math.max(0,ct.s+wd);if(ct.startDay!==undefined){ct.startDay+=dd;ct.endDay+=dd;}markChanged(cid);}});
+          render();
+        };
+        const onUp=()=>{document.removeEventListener('mousemove',onMove);document.removeEventListener('mouseup',onUp);};
+        document.addEventListener('mousemove',onMove);document.addEventListener('mouseup',onUp);
+      });
+
+      // ── RESIZE RIGHT (end date) ──
+      resR.addEventListener('mousedown', e=>{
+        e.preventDefault();e.stopPropagation();
+        const sx=e.clientX,origD=t.d,origED=t.endDay,origWD=t.workdays||t.d*5;
+        document.getElementById('tt').style.display='none';
+        const onMove=ev=>{
+          const dd=pxToDays(ev.clientX-sx); if(!dd) return;
+          const wd=daysToWeeks(dd);
+          t.d=Math.max(1,origD+wd);
+          if(t.endDay!==undefined)t.endDay=origED+dd;
+          t.workdays=Math.max(1,origWD+dd);
+          markChanged(t.id);
+          if(cascadeMode&&wd>0)getCascadeChildren(t.id).forEach(cid=>{const ct=tasks.find(x=>x.id===cid);if(ct){ct.s=Math.max(0,ct.s+wd);if(ct.startDay!==undefined){ct.startDay+=dd;ct.endDay+=dd;}markChanged(cid);}});
+          render();
+        };
+        const onUp=()=>{document.removeEventListener('mousemove',onMove);document.removeEventListener('mouseup',onUp);};
+        document.addEventListener('mousemove',onMove);document.addEventListener('mouseup',onUp);
       });
 
       gr.appendChild(bar);
