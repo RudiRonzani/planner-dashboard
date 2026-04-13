@@ -1250,15 +1250,17 @@ function render() {
   const capRowsWrap = document.getElementById('cap-rows-wrap');
   pList.innerHTML = ''; capLblCol.innerHTML = ''; ganttRowsWrap.innerHTML = ''; capRowsWrap.innerHTML = '';
 
+  // Calculate effective total width FIRST before using it
+  const allDaysCheck = dayViewOn ? getWorkDays(0, WEEKS) : null;
+  const DWCheck = dayViewOn ? Math.max(18, Math.floor((WEEKS * WW) / allDaysCheck.length)) : WW;
+  const effectiveTotalW = dayViewOn ? allDaysCheck.length * DWCheck : totalW;
+
   const depSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   depSvg.setAttribute('class', 'dep-svg');
   depSvg.style.width = effectiveTotalW + 'px';
   depSvg.style.height = '100%';
   depSvg.style.position = 'absolute';
   ganttRowsWrap.style.position = 'relative';
-  const allDaysCheck = dayViewOn ? getWorkDays(0, WEEKS) : null;
-  const DWCheck = dayViewOn ? Math.max(18, Math.floor((WEEKS * WW) / allDaysCheck.length)) : WW;
-  const effectiveTotalW = dayViewOn ? allDaysCheck.length * DWCheck : totalW;
   ganttRowsWrap.style.minWidth = effectiveTotalW + 'px';
   ganttRowsWrap.appendChild(depSvg);
 
