@@ -436,10 +436,7 @@ body {
 
   <!-- TOOLBAR -->
   <div class="toolbar">
-    <div class="legend-item"><div class="leg-dot" style="background:var(--alpha-blue)"></div>Alpha</div>
-    <div class="legend-item"><div class="leg-dot" style="background:var(--beta-green)"></div>Beta</div>
-    <div class="legend-item"><div class="leg-dot" style="background:var(--gamma-amber)"></div>Gamma</div>
-    <div class="legend-item"><div class="leg-dot" style="background:var(--delta-pink)"></div>Delta</div>
+    <div id="legend-items" style="display:flex;gap:10px;flex-wrap:wrap"></div>
     <div class="toolbar-sep"></div>
     <span id="mode-badge" class="badge badge-free">Vrij slepen</span>
     <button class="btn btn-sm" id="btn-cascade" onclick="toggleCascade()">Cascade aan</button>
@@ -964,6 +961,17 @@ function render() {
     if (ban && ban.classList.contains('show')) ban.classList.remove('show');
   }
 
+  // Update legend dynamically
+  const legendEl = document.getElementById('legend-items');
+  if (legendEl) {
+    const plansSeen = [...new Set(tasks.map(t => t.planId))];
+    legendEl.innerHTML = plansSeen.map(pid => {
+      const plan = allPlans.find(p => p.id === pid);
+      if (!plan) return '';
+      return '<div class="legend-item"><div class="leg-dot" style="background:' + plan.color + '"></div>' + plan.name + '</div>';
+    }).join('');
+  }
+
   // Week headers
   const wr = document.getElementById('weeks-row');
   wr.innerHTML = ''; wr.style.minWidth = totalW + 'px';
@@ -986,7 +994,7 @@ function render() {
   const depSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   depSvg.setAttribute('class', 'dep-svg');
   depSvg.style.width = totalW + 'px';
-  depSvg.style.height = (people.length * ROW) + 'px';
+  depSvg.style.height = '100%';
   depSvg.style.position = 'absolute';
   ganttRowsWrap.style.position = 'relative';
   ganttRowsWrap.style.minWidth = totalW + 'px';
@@ -1021,10 +1029,21 @@ function render() {
 
     const ptasks = tasks.filter(t => t.pid === p.id);
     const slots = [];
-    ptasks.forEach((t, ti) => {
+    const taskRowMap = {};
+    ptasks.forEach(t => {
       let row = 0;
       while (slots[row] && slots[row] > t.s) row++;
       slots[row] = t.s + t.d;
+      taskRowMap[t.id] = row;
+    });
+    const numSlotRows = Math.max(1, slots.length);
+    const dynROW = Math.max(ROW, 8 + numSlotRows * 24 + 6);
+    pr.style.height = dynROW + 'px';
+    cl.style.height = dynROW + 'px';
+    gr.style.height = dynROW + 'px';
+    gr.querySelectorAll('.gantt-cell').forEach(gc => gc.style.height = dynROW + 'px');
+    ptasks.forEach((t, ti) => {
+      const row = taskRowMap[t.id];
       const top = 4 + row * 24;
 
       const bar = document.createElement('div');
@@ -1033,7 +1052,7 @@ function render() {
       bar.textContent = t.lbl;
       bar.dataset.tid = t.id;
 
-      barPos[t.id] = { x: t.s * WW + 2 + (t.d * WW - 4) / 2, y: pi * ROW + top + 11 };
+      barPos[t.id] = { x: t.s * WW + 2 + (t.d * WW - 4) / 2, y: pi * dynROW + top + 11 };
 
       bar.addEventListener('mouseenter', e => {
         const tt = document.getElementById('tt');
