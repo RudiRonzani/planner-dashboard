@@ -650,8 +650,6 @@ async function connectMSAL() {
 
 async function getToken() {
   if (isDemo) return null;
-  const clientId = localStorage.getItem('planner_client');
-  const tenantId = localStorage.getItem('planner_tenant');
   if (!msalApp) return null;
   const accounts = msalApp.getAllAccounts();
   if (!accounts.length) return null;
@@ -659,6 +657,51 @@ async function getToken() {
     const r = await msalApp.acquireTokenSilent({ scopes: ['Tasks.ReadWrite','Group.Read.All'], account: accounts[0] });
     return r.accessToken;
   } catch { return null; }
+}
+
+async function getDvToken() {
+  if (isDemo) return null;
+  if (!msalApp) return null;
+  const accounts = msalApp.getAllAccounts();
+  if (!accounts.length) return null;
+  try {
+    const r = await msalApp.acquireTokenSilent({
+      scopes: [DATAVERSE_URL + '/user_impersonation'],
+      account: accounts[0]
+    });
+    return r.accessToken;
+  } catch(e) {
+    try {
+      const r = await msalApp.acquireTokenPopup({
+        scopes: [DATAVERSE_URL + '/user_impersonation'],
+        account: accounts[0]
+      });
+      return r.accessToken;
+    } catch(e2) {
+      console.error('Dataverse token failed:', e2.message);
+      return null;
+    }
+  }
+}
+
+async function dvGet(query) {
+  const token = await getDvToken();
+  if (!token) throw new Error('dvGet is not defined — Dataverse token ontbreekt. Controleer de Dynamics CRM permissie in App Registration.');
+  const r = await fetch(DATAVERSE_URL + '/api/data/v9.2/' + query, {
+    headers: {
+      Authorization: 'Bearer ' + token,
+      'OData-MaxVersion': '4.0',
+      'OData-Version': '4.0',
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      Prefer: 'odata.maxpagesize=500'
+    }
+  });
+  if (!r.ok) {
+    const err = await r.text();
+    throw new Error('Dataverse ' + r.status + ': ' + err.substring(0, 200));
+  }
+  return r.json();
 }
 
 function disconnect() {
