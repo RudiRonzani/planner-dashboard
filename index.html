@@ -349,6 +349,19 @@ body {
 .skeleton { background: var(--bg3); border-radius: 4px; animation: pulse 1.5s infinite; }
 @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:.8} }
 
+/* ── DAY VIEW ── */
+.day-toggle { font-size: 10px; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border2); background: var(--bg3); color: var(--text2); cursor: pointer; font-family: var(--sans); transition: all .15s; }
+.day-toggle:hover { background: var(--bg4); }
+.day-toggle.active { background: rgba(91,127,255,.15); border-color: rgba(91,127,255,.4); color: var(--accent); }
+.day-hdr-row { display: flex; height: 22px; border-bottom: 1px solid var(--border); background: var(--bg2); }
+.day-hdr-cell { flex-shrink: 0; display: flex; align-items: center; justify-content: center; border-right: 1px solid var(--border); font-size: 8px; color: var(--text3); font-family: var(--mono); }
+.day-cap-row { display: flex; border-bottom: 1px solid var(--border); }
+.day-cap-cell { flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding-bottom: 1px; }
+.day-cap-bar { width: 70%; border-radius: 2px 2px 0 0; min-height: 1px; transition: height .2s; }
+.day-cap-num { font-size: 7px; font-family: var(--mono); font-weight: 500; line-height: 1; }
+.day-section-hdr { height: 22px; display: flex; align-items: center; padding: 0 12px; font-size: 9px; font-weight: 500; color: var(--text3); letter-spacing: .06em; text-transform: uppercase; border-bottom: 1px solid var(--border); border-top: 1px solid var(--border); background: var(--bg2); }
+.day-lbl-row { height: 40px; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 12px; font-size: 9px; color: var(--text3); font-family: var(--mono); }
+
 /* ── STAT PILLS ── */
 .stat-row { display: flex; gap: 8px; margin-left: auto; }
 .stat-pill {
@@ -446,6 +459,8 @@ body {
     <div class="toolbar-right">
       <div class="stat-row" id="stats-row"></div>
       <div class="toolbar-sep"></div>
+      <button class="btn day-toggle" id="btn-dayview" onclick="toggleDayView()" title="Toon dagbelasting per persoon">Dagweergave</button>
+      <div class="toolbar-sep"></div>
       <button class="btn btn-sm btn-green" id="btn-save" onclick="saveToplanner()" style="display:none">↑ Opslaan in Planner</button>
     </div>
   </div>
@@ -457,6 +472,8 @@ body {
       <div class="col-hdr">Teamlid</div>
       <div id="people-list" class="people-list"></div>
       <div class="cap-lbl-hdr">Uren / week</div>
+    <div id="day-sidebar-hdr" style="display:none" class="day-section-hdr" style="padding:0 12px">Dag</div>
+    <div id="day-lbl-col"></div>
       <div id="cap-lbl-col"></div>
     </div>
     <!-- GANTT -->
@@ -466,6 +483,11 @@ body {
         <div class="gantt-rows-wrap" id="gantt-rows-wrap"></div>
         <div class="cap-section-hdr">Capaciteit per week</div>
         <div id="cap-rows-wrap"></div>
+      </div>
+      <div id="day-view-wrap" style="display:none">
+        <div class="day-section-hdr">Belasting per dag (werkdagen)</div>
+        <div class="day-hdr-row" id="day-hdr-row"></div>
+        <div id="day-cap-rows"></div>
       </div>
       <div class="empty-state" id="empty-state" style="display:none">
         <div class="empty-icon">◫</div>
@@ -529,6 +551,51 @@ let origTasks = [];
 let changedTaskIds = new Set();
 
 const WEEKS = 14;
+let dayViewOn = false;
+
+function toggleDayView() {
+  dayViewOn = !dayViewOn;
+  const btn = document.getElementById('btn-dayview');
+  btn.classList.toggle('active', dayViewOn);
+  btn.textContent = dayViewOn ? 'Weekweergave' : 'Dagweergave';
+  render();
+}
+
+// Returns working days (Mon-Fri) between two week indices
+function getWorkDays(startWeek, numWeeks) {
+  const days = [];
+  for (let w = startWeek; w < startWeek + numWeeks; w++) {
+    for (let d = 0; d < 7; d++) {
+      const date = new Date(START);
+      date.setDate(date.getDate() + w * 7 + d);
+      const dow = date.getDay();
+      if (dow >= 1 && dow <= 5) days.push({ date, week: w, dow });
+    }
+  }
+  return days;
+}
+
+// Calculate daily capacity across all weeks shown
+function calcDayCap() {
+  const allDays = getWorkDays(0, WEEKS);
+  const cap = {};
+  people.forEach(p => { cap[p.id] = {}; allDays.forEach(d => { cap[p.id][d.date.toDateString()] = 0; }); });
+  tasks.forEach(t => {
+    const taskDays = getWorkDays(t.s, t.d);
+    if (!taskDays.length) return;
+    const hrsPerDay = MAX_HRS / taskDays.length * (HRS_PER_TASK_WEEK * t.d / MAX_HRS);
+    // simpler: distribute evenly, cap at reasonable amount
+    const effortPerDay = (HRS_PER_TASK_WEEK * t.d) / taskDays.length;
+    taskDays.forEach(d => {
+      if (cap[t.pid] && cap[t.pid][d.date.toDateString()] !== undefined) {
+        cap[t.pid][d.date.toDateString()] += effortPerDay;
+      }
+    });
+  });
+  return { cap, allDays };
+}
+
+
 const WW = 64;
 const ROW = 52;
 const MAX_HRS = 8;
@@ -892,11 +959,13 @@ function autoOptimize() {
     let best = e;
     for (let s = e; s <= WEEKS; s++) {
       let ok = true;
-      for (let w = s; w < s + t.d; w++) { if ((used[t.pid][w] || 0) + HRS_PER_TASK_WEEK > MAX_HRS) { ok = false; break; } }
+      const hpw = t.effortHours ? t.effortHours / Math.max(1, t.d) : HRS_PER_TASK_WEEK;
+      for (let w = s; w < s + t.d; w++) { if ((used[t.pid][w] || 0) + hpw > MAX_HRS) { ok = false; break; } }
       if (ok) { best = s; break; }
     }
     ns[t.id] = best;
-    for (let w = best; w < best + t.d; w++) used[t.pid][w] = (used[t.pid][w] || 0) + HRS_PER_TASK_WEEK;
+    const hpw = t.effortHours ? t.effortHours / Math.max(1, t.d) : HRS_PER_TASK_WEEK;
+    for (let w = best; w < best + t.d; w++) used[t.pid][w] = (used[t.pid][w] || 0) + hpw;
   });
   tasks.forEach(t => { if (ns[t.id] !== undefined) { const newS = Math.min(ns[t.id], WEEKS - t.d); if (newS !== t.s) { t.s = newS; markChanged(t.id); } } });
   showBanner('ok', 'Plan geoptimaliseerd — afhankelijkheden gerespecteerd, overbelasting geminimaliseerd.');
@@ -1125,6 +1194,81 @@ function render() {
     });
     capRowsWrap.appendChild(cr);
   });
+
+  // Day view
+  const dayWrap = document.getElementById('day-view-wrap');
+  const dayHdrRow = document.getElementById('day-hdr-row');
+  const dayCap = document.getElementById('day-cap-rows');
+  const dayLblCol = document.getElementById('day-lbl-col');
+  const daySidebarHdr = document.getElementById('day-sidebar-hdr');
+
+  if (dayViewOn) {
+    dayWrap.style.display = 'block';
+    if (daySidebarHdr) daySidebarHdr.style.display = 'flex';
+    dayLblCol.innerHTML = '';
+
+    const { cap: dcap, allDays } = calcDayCap();
+    const DW = Math.max(18, Math.floor((WEEKS * WW) / allDays.length));
+    const totalDW = allDays.length * DW;
+
+    // Day header
+    dayHdrRow.innerHTML = '';
+    dayHdrRow.style.minWidth = totalDW + 'px';
+    const MONTHS = ['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
+    allDays.forEach(d => {
+      const dc = document.createElement('div');
+      dc.className = 'day-hdr-cell';
+      dc.style.width = DW + 'px';
+      const isMonday = d.dow === 1;
+      dc.style.borderLeft = isMonday ? '1px solid rgba(255,255,255,.15)' : '';
+      dc.textContent = isMonday ? d.date.getDate() + ' ' + MONTHS[d.date.getMonth()] : d.date.getDate().toString();
+      if (isMonday) dc.style.color = 'var(--text2)';
+      dayHdrRow.appendChild(dc);
+    });
+
+    // Day cap rows per person
+    dayCap.innerHTML = '';
+    const maxDayHrs = people.reduce((mx, p) => {
+      return Math.max(mx, ...allDays.map(d => dcap[p.id][d.date.toDateString()] || 0));
+    }, MAX_HRS);
+
+    people.forEach((p, pi) => {
+      // sidebar label
+      const dl = document.createElement('div');
+      dl.className = 'day-lbl-row';
+      dl.style.height = '40px';
+      dl.textContent = p.name.split(' ')[0];
+      dayLblCol.appendChild(dl);
+
+      const dr = document.createElement('div');
+      dr.className = 'day-cap-row';
+      dr.style.minWidth = totalDW + 'px';
+      dr.style.height = '40px';
+
+      allDays.forEach(d => {
+        const h = Math.round((dcap[p.id][d.date.toDateString()] || 0) * 10) / 10;
+        const cc = document.createElement('div');
+        cc.className = 'day-cap-cell';
+        cc.style.width = DW + 'px';
+        cc.style.height = '40px';
+        const isMonday = d.dow === 1;
+        if (isMonday) cc.style.borderLeft = '1px solid rgba(255,255,255,.15)';
+        if (h > 0) {
+          const over = h > MAX_HRS, warn = !over && h >= MAX_HRS * 0.75;
+          const bc = over ? '#ff4d4d' : warn ? '#f5a623' : '#2ecc8a';
+          const tc = over ? '#ff8080' : warn ? '#f5c060' : '#5be3aa';
+          const barH = Math.min(28, Math.round(h / maxDayHrs * 28));
+          cc.innerHTML = '<div class="day-cap-bar" style="height:' + barH + 'px;background:' + bc + '"></div><span class="day-cap-num" style="color:' + tc + '">' + (h % 1 === 0 ? h : h.toFixed(1)) + '</span>';
+        }
+        dr.appendChild(cc);
+      });
+      dayCap.appendChild(dr);
+    });
+  } else {
+    dayWrap.style.display = 'none';
+    if (daySidebarHdr) daySidebarHdr.style.display = 'none';
+    dayLblCol.innerHTML = '';
+  }
 
   // Draw dep lines
   tasks.forEach(t => {
