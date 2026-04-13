@@ -748,63 +748,179 @@ async function loadPlannerPlans() {
 
 async function loadTasksForPlans() {
   if (!selectedPlanIds.length) { tasks = []; origTasks = []; render(); return; }
+  const dvPlans = allPlans.filter(p => selectedPlanIds.includes(p.id) && p.source === 'dataverse');
+  const graphPlans = allPlans.filter(p => selectedPlanIds.includes(p.id) && p.source === 'graph');
   showBanner('info', `Taken ophalen voor ${selectedPlanIds.length} plan(s)...`);
   try {
-    const allTasks = [];
+    const allTasksArr = [];
     const peopleMap = {};
-    for (const planId of selectedPlanIds) {
-      const plan = allPlans.find(p => p.id === planId);
-      const planDetails = await graphGet(`planner/plans/${planId}`);
+    const AVBGS = ['rgba(55,138,221,.2)','rgba(29,158,117,.2)','rgba(186,117,23,.2)','rgba(194,68,110,.2)','rgba(123,94,167,.2)','rgba(46,156,181,.2)'];
+    const AVTX = ['#8ab8ed','#6dc9a8','#d4a060','#e08aab','#b89fd4','#7ccfdf'];
+
+    // Helper: convert date to day-offset from START (in days, not weeks)
+    function dateToDayOffset(dateStr) {
+      if (!dateStr) return null;
+      const d = new Date(dateStr);
+      return Math.round((d - START) / (24*3600*1000));
+    }
+
+    // Helper: count workdays between two day-offsets
+    function workdaysBetween(startDay, endDay) {
+      let count = 0;
+      for (let d = startDay; d <= endDay; d++) {
+        const date = new Date(START);
+        date.setDate(date.getDate() + d);
+        const dow = date.getDay();
+        if (dow >= 1 && dow <= 5) count++;
+      }
+      return Math.max(1, count);
+    }
+
+    // ── DATAVERSE PLANS ──────────────────────────────────────────────────
+    for (const plan of dvPlans) {
+      const tData = await dvGet(
+        `msdyn_projecttasks?$select=msdyn_projecttaskid,msdyn_subject,msdyn_scheduledstart,msdyn_scheduledend,msdyn_effort,msdyn_scheduleddurationminutes,msdyn_progress` +
+        `&$filter=_msdyn_project_value eq '${plan.id}' and statecode eq 0`
+      );
+
+      const aData = await dvGet(
+        `msdyn_resourceassignments?$select=_msdyn_taskid_value,_msdyn_bookableresourceid_value` +
+        `&$filter=_msdyn_projectid_value eq '${plan.id}'`
+      ).catch(() => ({ value: [] }));
+
+      const assignMap = {};
+      (aData.value || []).forEach(a => {
+        if (a._msdyn_taskid_value && a._msdyn_bookableresourceid_value) {
+          if (!assignMap[a._msdyn_taskid_value]) assignMap[a._msdyn_taskid_value] = [];
+          assignMap[a._msdyn_taskid_value].push(a._msdyn_bookableresourceid_value);
+        }
+      });
+
+      const resIds = [...new Set(Object.values(assignMap).flat())];
+      for (const resId of resIds) {
+        if (!peopleMap[resId]) {
+          try {
+            const res = await dvGet(`bookableresources(${resId})?$select=name,_userid_value`);
+            const userId = res._userid_value;
+            let role = '';
+            if (userId) {
+              try { const u = await graphGet(`users/${userId}?$select=jobTitle`); role = u.jobTitle || ''; } catch {}
+            }
+            peopleMap[resId] = { id: resId, name: res.name || resId.substring(0,8), role, aadId: userId };
+          } catch { peopleMap[resId] = { id: resId, name: resId.substring(0,8), role: '' }; }
+        }
+      }
+
+      const depData = await dvGet(
+        `msdyn_taskdependencies?$select=_msdyn_predecessortask_value,_msdyn_successortask_value` +
+        `&$filter=_msdyn_project_value eq '${plan.id}'`
+      ).catch(() => ({ value: [] }));
+      const depMap = {};
+      (depData.value || []).forEach(d => {
+        const succ = d._msdyn_successortask_value;
+        const pred = d._msdyn_predecessortask_value;
+        if (succ && pred) { if (!depMap[succ]) depMap[succ] = []; depMap[succ].push(pred); }
+      });
+
+      (tData.value || []).forEach(t => {
+        const taskId = t.msdyn_projecttaskid;
+        const assignees = assignMap[taskId] || [];
+        if (!assignees.length) return;
+
+        // Day-based offsets
+        const startDay = dateToDayOffset(t.msdyn_scheduledstart);
+        const endDay = dateToDayOffset(t.msdyn_scheduledend);
+        if (startDay === null) return;
+
+        // Convert to week-slot for gantt (s = week index, d = number of weeks)
+        const startWeek = Math.max(0, Math.floor(startDay / 7));
+        const endWeek = endDay !== null ? Math.max(startWeek, Math.ceil(endDay / 7)) : startWeek + 1;
+        const durWeeks = Math.max(1, endWeek - startWeek);
+
+        // Actual workdays for capacity calculation
+        const workdays = endDay !== null ? workdaysBetween(startDay, endDay) : durWeeks * 5;
+
+        // Effort in hours (msdyn_effort is in hours)
+        const effortHours = (t.msdyn_effort && t.msdyn_effort > 0)
+          ? t.msdyn_effort / Math.max(1, assignees.length)
+          : workdays * MAX_HRS; // fallback: full day per workday
+
+        assignees.forEach(resId => {
+          allTasksArr.push({
+            id: taskId + '_' + resId,
+            dvTaskId: taskId,
+            pid: resId,
+            proj: plan.name,
+            lbl: t.msdyn_subject || '(geen naam)',
+            s: startWeek,
+            d: durWeeks,
+            startDay,
+            endDay: endDay || startDay,
+            workdays,
+            effortHours,
+            effortReal: !!(t.msdyn_effort && t.msdyn_effort > 0),
+            progress: Math.round((t.msdyn_progress || 0) * 100),
+            c: plan.color,
+            deps: (depMap[taskId] || []).map(pid => pid + '_' + resId),
+            planId: plan.id,
+            source: 'dataverse'
+          });
+        });
+      });
+    }
+
+    // ── GRAPH PLANS (basic fallback) ─────────────────────────────────────
+    for (const plan of graphPlans) {
+      const planDetails = await graphGet(`planner/plans/${plan.id}`);
       const groupId = planDetails.container && planDetails.container.containerId ? planDetails.container.containerId : null;
       let membersData = { value: [] };
       if (groupId) {
         try { membersData = await graphGet(`groups/${groupId}/members?$select=id,displayName,jobTitle`); } catch(e) {}
       }
-      const tasksData = await graphGet(`planner/plans/${planId}/tasks`);
+      const tasksData = await graphGet(`planner/plans/${plan.id}/tasks`);
       (tasksData.value || []).forEach(t => {
         const assignees = Object.keys(t.assignments || {});
         assignees.forEach(uid => { if (!peopleMap[uid]) peopleMap[uid] = { id: uid }; });
-        const startW = t.startDateTime ? Math.max(0, Math.round((new Date(t.startDateTime) - START) / (7*24*3600*1000))) : Math.floor(Math.random()*8);
-        const endW = t.dueDateTime ? Math.max(0, Math.round((new Date(t.dueDateTime) - START) / (7*24*3600*1000))) : startW + 2;
-        const dur = Math.max(1, endW - startW);
-        allTasks.push({
+        const startDay = t.startDateTime ? Math.round((new Date(t.startDateTime) - START) / (24*3600*1000)) : 0;
+        const endDay = t.dueDateTime ? Math.round((new Date(t.dueDateTime) - START) / (24*3600*1000)) : startDay + 5;
+        const startWeek = Math.max(0, Math.floor(startDay / 7));
+        const endWeek = Math.max(startWeek + 1, Math.ceil(endDay / 7));
+        const durWeeks = Math.max(1, endWeek - startWeek);
+        allTasksArr.push({
           id: t.id, pid: assignees[0] || 'unassigned',
-          proj: plan ? plan.name : planId,
-          lbl: t.title, s: Math.max(0, startW), d: dur,
-          c: plan ? plan.color : '#888', deps: [],
-          planId, etag: t['@odata.etag'] || null
+          proj: plan.name, lbl: t.title,
+          s: startWeek, d: durWeeks,
+          startDay, endDay,
+          workdays: durWeeks * 5,
+          effortHours: durWeeks * HRS_PER_TASK_WEEK,
+          effortReal: false,
+          progress: t.percentComplete || 0,
+          c: plan.color, deps: [], planId: plan.id,
+          source: 'graph', etag: t['@odata.etag'] || null
         });
       });
       (membersData.value || []).forEach(m => {
-        if (!peopleMap[m.id]) peopleMap[m.id] = { id: m.id, name: m.displayName || m.id };
-        else peopleMap[m.id].name = m.displayName || m.id;
+        if (!peopleMap[m.id]) peopleMap[m.id] = { id: m.id, name: m.displayName || m.id, role: m.jobTitle || '' };
+        else if (!peopleMap[m.id].name) peopleMap[m.id].name = m.displayName || m.id;
       });
     }
-    // Resolve user display names
-    const uids = Object.keys(peopleMap).slice(0, 20);
-    for (const uid of uids) {
-      try {
-        const u = await graphGet(`users/${uid}?$select=displayName,jobTitle`);
-        peopleMap[uid] = { ...peopleMap[uid], name: u.displayName, role: u.jobTitle || '' };
-      } catch {}
-    }
-    const AVBGS = ['rgba(55,138,221,.2)','rgba(29,158,117,.2)','rgba(186,117,23,.2)','rgba(194,68,110,.2)','rgba(123,94,167,.2)','rgba(46,156,181,.2)'];
-    const AVTX = ['#8ab8ed','#6dc9a8','#d4a060','#e08aab','#b89fd4','#7ccfdf'];
+
     people = Object.values(peopleMap).map((p, i) => ({
       ...p, bg: AVBGS[i % AVBGS.length], tx: AVTX[i % AVTX.length],
       name: p.name || p.id.substring(0,8)
     }));
-    tasks = allTasks.filter(t => t.pid !== 'unassigned' && people.find(p => p.id === t.pid));
+
+    tasks = allTasksArr.filter(t => t.pid !== 'unassigned' && people.find(p => p.id === t.pid));
     origTasks = tasks.map(t => ({ ...t }));
     changedTaskIds = new Set();
     hideBanners();
-    showBanner('ok', `${tasks.length} taken geladen voor ${selectedPlanIds.length} plan(s).`);
+    const effortTasks = tasks.filter(t => t.effortReal).length;
+    showBanner('ok', `${tasks.length} taken geladen${effortTasks ? ` — ${effortTasks} met echte inspanningsdata` : ' (duur berekend uit datums)'}.`);
     render();
   } catch(e) {
     showBanner('err', 'Fout bij laden taken: ' + e.message);
   }
 }
-
 async function reloadData() { await loadTasksForPlans(); }
 
 // ── SAVE TO PLANNER ──────────────────────────────────────────────────────────
@@ -1041,16 +1157,36 @@ function render() {
     }).join('');
   }
 
-  // Week headers
+  // Week/day headers
   const wr = document.getElementById('weeks-row');
-  wr.innerHTML = ''; wr.style.minWidth = totalW + 'px';
-  for (let w = 0; w < WEEKS; w++) {
-    const lbl = weekLabel(w);
-    const wc = document.createElement('div');
-    wc.className = 'week-cell';
-    wc.style.width = WW + 'px';
-    wc.innerHTML = `<span class="wdate">${lbl.date}</span><span>${lbl.week}</span>`;
-    wr.appendChild(wc);
+  wr.innerHTML = '';
+  const MONTHS = ['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
+  if (dayViewOn) {
+    const allDaysHdr = getWorkDays(0, WEEKS);
+    const DWH = Math.max(18, Math.floor((WEEKS * WW) / allDaysHdr.length));
+    wr.style.minWidth = (allDaysHdr.length * DWH) + 'px';
+    allDaysHdr.forEach(d => {
+      const wc = document.createElement('div');
+      wc.className = 'week-cell';
+      wc.style.width = DWH + 'px';
+      wc.style.fontSize = '9px';
+      const isMonday = d.dow === 1;
+      if (isMonday) wc.style.borderLeft = '1px solid rgba(255,255,255,.2)';
+      wc.innerHTML = isMonday
+        ? `<span class="wdate" style="font-size:9px">${d.date.getDate()} ${MONTHS[d.date.getMonth()]}</span>`
+        : `<span style="color:var(--text3);font-size:8px">${d.date.getDate()}</span>`;
+      wr.appendChild(wc);
+    });
+  } else {
+    wr.style.minWidth = totalW + 'px';
+    for (let w = 0; w < WEEKS; w++) {
+      const lbl = weekLabel(w);
+      const wc = document.createElement('div');
+      wc.className = 'week-cell';
+      wc.style.width = WW + 'px';
+      wc.innerHTML = `<span class="wdate">${lbl.date}</span><span>${lbl.week}</span>`;
+      wr.appendChild(wc);
+    }
   }
 
   // People sidebar + gantt rows
@@ -1062,11 +1198,14 @@ function render() {
 
   const depSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   depSvg.setAttribute('class', 'dep-svg');
-  depSvg.style.width = totalW + 'px';
+  const svgW = dayViewOn ? (allDaysCheck ? allDaysCheck.length * DWCheck : totalW) : totalW;
+  depSvg.style.width = svgW + 'px';
   depSvg.style.height = '100%';
   depSvg.style.position = 'absolute';
   ganttRowsWrap.style.position = 'relative';
-  ganttRowsWrap.style.minWidth = totalW + 'px';
+  const allDaysCheck = dayViewOn ? getWorkDays(0, WEEKS) : null;
+  const DWCheck = dayViewOn ? Math.max(18, Math.floor((WEEKS * WW) / allDaysCheck.length)) : WW;
+  ganttRowsWrap.style.minWidth = (dayViewOn ? allDaysCheck.length * DWCheck : totalW) + 'px';
   ganttRowsWrap.appendChild(depSvg);
 
   const barPos = {};
@@ -1087,13 +1226,26 @@ function render() {
     // Gantt row
     const gr = document.createElement('div');
     gr.className = 'gantt-row';
-    gr.style.minWidth = totalW + 'px';
+    const allDaysForGantt = dayViewOn ? getWorkDays(0, WEEKS) : null;
+    const DW = dayViewOn ? Math.max(18, Math.floor((WEEKS * WW) / allDaysForGantt.length)) : WW;
+    const totalDayW = dayViewOn ? allDaysForGantt.length * DW : totalW;
+    gr.style.minWidth = (dayViewOn ? totalDayW : totalW) + 'px';
     gr.style.height = ROW + 'px';
-    for (let w = 0; w < WEEKS; w++) {
-      const gc = document.createElement('div');
-      gc.className = 'gantt-cell' + (w % 2 ? ' shade' : '');
-      gc.style.width = WW + 'px';
-      gr.appendChild(gc);
+    if (dayViewOn) {
+      allDaysForGantt.forEach((d, di) => {
+        const gc = document.createElement('div');
+        gc.className = 'gantt-cell' + (d.dow === 1 ? '' : ' shade');
+        gc.style.width = DW + 'px';
+        if (d.dow === 1) gc.style.borderLeft = '1px solid rgba(255,255,255,.15)';
+        gr.appendChild(gc);
+      });
+    } else {
+      for (let w = 0; w < WEEKS; w++) {
+        const gc = document.createElement('div');
+        gc.className = 'gantt-cell' + (w % 2 ? ' shade' : '');
+        gc.style.width = WW + 'px';
+        gr.appendChild(gc);
+      }
     }
 
     const ptasks = tasks.filter(t => t.pid === p.id);
@@ -1117,11 +1269,30 @@ function render() {
 
       const bar = document.createElement('div');
       bar.className = 'task-bar' + (viol.has(t.id) ? ' dep-err' : '');
-      bar.style.cssText = `left:${t.s*WW+2}px;width:${t.d*WW-4}px;top:${top}px;background:${t.c};color:#fff;`;
+      let barLeft, barWidth;
+      if (dayViewOn && allDaysForGantt && t.startDay !== undefined) {
+        // Find pixel position based on actual day offset
+        const barStartIdx = allDaysForGantt.findIndex(d => {
+          const offset = Math.round((d.date - START) / (24*3600*1000));
+          return offset >= t.startDay;
+        });
+        const barEndIdx = allDaysForGantt.findIndex(d => {
+          const offset = Math.round((d.date - START) / (24*3600*1000));
+          return offset > (t.endDay || t.startDay);
+        });
+        const si = barStartIdx >= 0 ? barStartIdx : 0;
+        const ei = barEndIdx >= 0 ? barEndIdx : allDaysForGantt.length;
+        barLeft = si * DW + 2;
+        barWidth = Math.max(DW - 4, (ei - si) * DW - 4);
+      } else {
+        barLeft = t.s * WW + 2;
+        barWidth = t.d * WW - 4;
+      }
+      bar.style.cssText = `left:${barLeft}px;width:${barWidth}px;top:${top}px;background:${t.c};color:#fff;`;
       bar.textContent = t.lbl;
       bar.dataset.tid = t.id;
 
-      barPos[t.id] = { x: t.s * WW + 2 + (t.d * WW - 4) / 2, y: pi * dynROW + top + 11 };
+      barPos[t.id] = { x: barLeft + barWidth / 2, y: pi * dynROW + top + 11 };
 
       bar.addEventListener('mouseenter', e => {
         const tt = document.getElementById('tt');
@@ -1180,7 +1351,7 @@ function render() {
     // Cap row
     const cr = document.createElement('div');
     cr.className = 'cap-row';
-    cr.style.minWidth = totalW + 'px';
+    cr.style.minWidth = (dayViewOn && allDaysCheck ? allDaysCheck.length * DWCheck : totalW) + 'px';
     cap[p.id].forEach((h, w) => {
       const cc = document.createElement('div');
       cc.className = 'cap-cell';
