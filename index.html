@@ -1128,18 +1128,18 @@ async function saveToplanner() {
         const startDate = t.startDay !== undefined
           ? new Date(base4save.getTime() + t.startDay * 86400000)
           : new Date(base4save.getTime() + t.s * 7 * 86400000);
-        const endDate = t.endDay !== undefined
-          ? new Date(base4save.getTime() + t.endDay * 86400000)
-          : new Date(base4save.getTime() + (t.s + t.d) * 7 * 86400000);
-
+        // PSS requires @@odata.type (double @), msdyn_project@odata.bind, and
+        // only send start + duration (not both start+finish to avoid recalculation issues)
+        const durationMinutes = Math.max(480, (t.workdays || t.d * 5) * 480);
+        const entityObj = {
+          '@@odata.type': 'Microsoft.Dynamics.CRM.msdyn_projecttask',
+          'msdyn_project@odata.bind': `/msdyn_projects(${t.planId})`,
+          msdyn_projecttaskid: t.dvTaskId,
+          msdyn_start: startDate.toISOString(),
+          msdyn_duration: durationMinutes
+        };
         await dvAction('msdyn_PssUpdateV1', {
-          Entity: JSON.stringify({
-            '@odata.type': 'Microsoft.Dynamics.CRM.msdyn_projecttask',
-            msdyn_projecttaskid: t.dvTaskId,
-            msdyn_start: startDate.toISOString(),
-            msdyn_finish: endDate.toISOString(),
-            msdyn_duration: Math.max(1, (t.workdays || t.d * 5)) * 480
-          }),
+          Entity: JSON.stringify(entityObj),
           OperationSetId: opSetId
         });
       }
@@ -1147,14 +1147,18 @@ async function saveToplanner() {
       // Step 3: Execute OperationSet
       await dvAction('msdyn_ExecuteOperationSetV1', { OperationSetId: opSetId });
 
-      // Step 4: Wait for async persistence (PSS is async)
-      await new Promise(r => setTimeout(r, 2000));
-
-      // Step 5: Check status
-      const opResult = await dvGet(`msdyn_operationsets(${opSetId})?$select=msdyn_status`);
-      const statusCode = opResult.msdyn_status;
-      // 192350003 = Completed, 192350004 = Failed
-      if (statusCode === 192350004) throw new Error('OperationSet mislukt');
+      // Step 4: Wait for async persistence and poll status
+      let opStatus = 0;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await new Promise(r => setTimeout(r, 1500));
+        try {
+          const opResult = await dvGet(`msdyn_operationsets(${opSetId})?$select=msdyn_status`);
+          opStatus = opResult.msdyn_status;
+          // 192350003 = Completed, 192350004 = Failed, 192350000 = Open (still processing)
+          if (opStatus === 192350003 || opStatus === 192350004) break;
+        } catch {}
+      }
+      if (opStatus === 192350004) throw new Error('OperationSet mislukt na verwerking');
 
       done += planTasks.length;
       status.textContent = `${done + failed} / ${changed.length} taken`;
