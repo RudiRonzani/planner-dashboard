@@ -556,7 +556,7 @@ async function connectMSAL() {
   script.onload = async () => {
     try {
       msalApp = new msal.PublicClientApplication({
-        auth: { clientId, authority: `https://login.microsoftonline.com/${tenantId}`, redirectUri: 'https://induver.sharepoint.com/:u:/r/sites/Projects/Gedeelde%20documenten/planner-dashboard.html?csf=1&web=1&e=A0CMap' }
+        auth: { clientId, authority: `https://login.microsoftonline.com/${tenantId}`, redirectUri: 'https://delightful-cliff-0390d0c03.7.azurestaticapps.net' }
       });
       await msalApp.initialize();
       const resp = await msalApp.loginPopup({ scopes: ['Tasks.ReadWrite','Group.Read.All','User.Read'] });
