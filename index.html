@@ -1128,18 +1128,12 @@ async function saveToplanner() {
         const startDate = t.startDay !== undefined
           ? new Date(base4save.getTime() + t.startDay * 86400000)
           : new Date(base4save.getTime() + t.s * 7 * 86400000);
-        // PSS Update: Entity is a JSON string with task ID + fields to update
-        // Do NOT include @odata.type or navigation properties in update payload
-        // Only send start + duration (sending finish too causes recalculation issues)
+        // PSS Update via msdyn_projecttasks entity bound action
+        // Entity fields go at root level alongside OperationSetId
         const durationMinutes = Math.max(480, (t.workdays || t.d * 5) * 480);
-        const entityStr = JSON.stringify({
-          msdyn_projecttaskid: t.dvTaskId,
+        await dvActionPss(opSetId, t.dvTaskId, {
           msdyn_start: startDate.toISOString(),
           msdyn_duration: durationMinutes
-        });
-        await dvAction('msdyn_PssUpdateV1', {
-          Entity: entityStr,
-          OperationSetId: opSetId
         });
       }
 
@@ -1196,7 +1190,35 @@ async function saveToplanner() {
   else showBanner('ok', `${done} taken succesvol bijgewerkt in Planner.`);
 }
 
-// Call a Dataverse unbound action
+
+// ── PSS Schedule API helpers ──────────────────────────────────────────────────
+// msdyn_PssUpdateV1 via the unbound action endpoint
+// Correct format: POST to /api/data/v9.2/msdyn_PssUpdateV1
+// Body: { Entity: { msdyn_projecttaskid, ...fields }, OperationSetId }
+async function dvActionPss(opSetId, taskId, fields) {
+  const token = await getDvToken();
+  if (!token) throw new Error('Geen Dataverse token');
+  const body = {
+    Entity: { msdyn_projecttaskid: taskId, ...fields },
+    OperationSetId: opSetId
+  };
+  const r = await fetch(`${DATAVERSE_URL}/api/data/v9.2/msdyn_PssUpdateV1`, {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + token,
+      'Content-Type': 'application/json',
+      'OData-MaxVersion': '4.0',
+      'OData-Version': '4.0'
+    },
+    body: JSON.stringify(body)
+  });
+  if (!r.ok) {
+    const err = await r.text();
+    throw new Error('msdyn_PssUpdateV1 mislukt: ' + err.substring(0, 400));
+  }
+  return r.status === 204 ? {} : r.json();
+}
+
 async function dvAction(actionName, params) {
   const token = await getDvToken();
   if (!token) throw new Error('Geen Dataverse token');
@@ -1212,11 +1234,12 @@ async function dvAction(actionName, params) {
   });
   if (!r.ok) {
     const err = await r.text();
-    throw new Error(actionName + ' mislukt: ' + err.substring(0, 300));
+    throw new Error(actionName + ' mislukt: ' + err.substring(0, 400));
   }
   if (r.status === 204) return {};
   return r.json();
 }
+
 
 // ── CONFIG MODAL ─────────────────────────────────────────────────────────────
 function showConfigModal() {
