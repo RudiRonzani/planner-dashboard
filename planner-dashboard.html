@@ -1,0 +1,1134 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portfolio Capaciteitsplanning — Planner Dashboard</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500&display=swap');
+
+:root {
+  --bg: #0f0f11;
+  --bg2: #16161a;
+  --bg3: #1e1e24;
+  --bg4: #26262e;
+  --border: rgba(255,255,255,0.08);
+  --border2: rgba(255,255,255,0.14);
+  --text: #e8e8ed;
+  --text2: #8a8a99;
+  --text3: #54545f;
+  --accent: #5b7fff;
+  --accent2: #3d5fe0;
+  --green: #2ecc8a;
+  --amber: #f5a623;
+  --red: #ff4d4d;
+  --alpha-blue: #378ADD;
+  --beta-green: #1D9E75;
+  --gamma-amber: #BA7517;
+  --delta-pink: #C2446E;
+  --mono: 'IBM Plex Mono', monospace;
+  --sans: 'IBM Plex Sans', sans-serif;
+  --ww: 64px;
+  --row: 52px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  font-size: 13px;
+}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg2); }
+::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 3px; }
+
+/* ── LAYOUT ── */
+#app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+/* ── HEADER ── */
+.hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 20px; height: 52px; border-bottom: 1px solid var(--border);
+  background: var(--bg2); flex-shrink: 0; gap: 12px;
+}
+.hdr-logo {
+  display: flex; align-items: center; gap: 10px;
+}
+.hdr-logo svg { opacity: .7; }
+.hdr-title { font-size: 13px; font-weight: 500; letter-spacing: .02em; }
+.hdr-title span { color: var(--text2); font-weight: 300; }
+.hdr-right { display: flex; align-items: center; gap: 8px; }
+
+/* ── BUTTONS ── */
+.btn {
+  font-family: var(--sans); font-size: 11px; font-weight: 500;
+  padding: 5px 12px; border-radius: 5px; cursor: pointer;
+  border: 1px solid var(--border2); background: var(--bg3);
+  color: var(--text); transition: all .15s; white-space: nowrap;
+  letter-spacing: .01em;
+}
+.btn:hover { background: var(--bg4); border-color: rgba(255,255,255,.22); }
+.btn:active { transform: scale(.97); }
+.btn-accent {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+.btn-accent:hover { background: var(--accent2); border-color: var(--accent2); }
+.btn-green { background: rgba(46,204,138,.15); border-color: rgba(46,204,138,.4); color: var(--green); }
+.btn-green:hover { background: rgba(46,204,138,.25); }
+.btn-red { background: rgba(255,77,77,.12); border-color: rgba(255,77,77,.35); color: var(--red); }
+.btn-danger { color: var(--red); border-color: rgba(255,77,77,.3); background: transparent; }
+.btn-danger:hover { background: rgba(255,77,77,.1); }
+.btn-sm { padding: 3px 8px; font-size: 10px; }
+.btn-icon { padding: 5px 8px; }
+
+/* ── BADGE ── */
+.badge {
+  font-family: var(--mono); font-size: 9px; padding: 2px 7px;
+  border-radius: 3px; border: 1px solid; letter-spacing: .04em;
+  text-transform: uppercase; font-weight: 500;
+}
+.badge-cascade { background: rgba(245,166,35,.12); border-color: rgba(245,166,35,.4); color: var(--amber); }
+.badge-free { background: var(--bg3); border-color: var(--border); color: var(--text3); }
+.badge-connected { background: rgba(46,204,138,.12); border-color: rgba(46,204,138,.35); color: var(--green); }
+.badge-demo { background: rgba(91,127,255,.12); border-color: rgba(91,127,255,.35); color: var(--accent); }
+
+/* ── BANNER ── */
+.banner {
+  display: none; align-items: center; gap: 10px;
+  padding: 8px 20px; font-size: 11px; flex-shrink: 0;
+  border-bottom: 1px solid;
+}
+.banner.show { display: flex; }
+.banner-err { background: rgba(255,77,77,.08); border-color: rgba(255,77,77,.25); color: #ff8080; }
+.banner-ok { background: rgba(46,204,138,.08); border-color: rgba(46,204,138,.25); color: var(--green); }
+.banner-info { background: rgba(91,127,255,.08); border-color: rgba(91,127,255,.25); color: #8aabff; }
+.banner-warn { background: rgba(245,166,35,.08); border-color: rgba(245,166,35,.25); color: var(--amber); }
+
+/* ── TOOLBAR ── */
+.toolbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 20px; border-bottom: 1px solid var(--border);
+  background: var(--bg2); flex-shrink: 0; flex-wrap: wrap;
+}
+.toolbar-sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+.legend-item { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--text2); }
+.leg-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+.toolbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+/* ── MAIN BODY ── */
+.body-wrap { display: flex; flex: 1; overflow: hidden; }
+
+/* ── SIDEBAR PEOPLE ── */
+.people-col {
+  width: 160px; flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.col-hdr {
+  height: 34px; display: flex; align-items: center; padding: 0 12px;
+  font-size: 10px; font-weight: 500; color: var(--text3);
+  letter-spacing: .06em; text-transform: uppercase;
+  border-bottom: 1px solid var(--border); background: var(--bg2);
+  flex-shrink: 0;
+}
+.people-list { overflow-y: hidden; }
+.person-row {
+  height: var(--row); display: flex; align-items: center;
+  padding: 0 12px; gap: 9px; border-bottom: 1px solid var(--border);
+}
+.av {
+  width: 28px; height: 28px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 500; flex-shrink: 0;
+  font-family: var(--mono);
+}
+.p-name { font-size: 11px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.p-role { font-size: 9px; color: var(--text3); white-space: nowrap; }
+.cap-lbl-col { flex-shrink: 0; }
+.cap-lbl-hdr {
+  height: 26px; display: flex; align-items: center; padding: 0 12px;
+  font-size: 9px; font-weight: 500; color: var(--text3);
+  letter-spacing: .06em; text-transform: uppercase;
+  border-bottom: 1px solid var(--border); border-top: 1px solid var(--border);
+  background: var(--bg2); flex-shrink: 0;
+}
+.cap-lbl-row {
+  height: 24px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; padding: 0 12px;
+  font-size: 9px; color: var(--text3); font-family: var(--mono);
+  white-space: nowrap; overflow: hidden;
+}
+
+/* ── GANTT AREA ── */
+.gantt-wrap { flex: 1; overflow: auto; position: relative; }
+.gantt-inner { display: flex; flex-direction: column; }
+
+.weeks-row {
+  display: flex; height: 34px; flex-shrink: 0;
+  border-bottom: 1px solid var(--border); background: var(--bg2);
+  position: sticky; top: 0; z-index: 10;
+}
+.week-cell {
+  width: var(--ww); flex-shrink: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  border-right: 1px solid var(--border);
+  font-size: 9px; color: var(--text3); font-family: var(--mono);
+  line-height: 1.4; letter-spacing: .02em;
+}
+.week-cell .wdate { font-size: 10px; color: var(--text2); font-weight: 500; }
+.week-cell.today { border-right-color: var(--accent); }
+.week-cell.today .wdate { color: var(--accent); }
+
+.gantt-rows-wrap { position: relative; }
+.gantt-row {
+  height: var(--row); border-bottom: 1px solid var(--border);
+  position: relative; display: flex;
+}
+.gantt-cell {
+  width: var(--ww); flex-shrink: 0; height: 100%;
+  border-right: 1px solid var(--border);
+}
+.gantt-cell.shade { background: rgba(255,255,255,.015); }
+
+/* ── DEP SVG ── */
+.dep-svg { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 1; }
+
+/* ── TASK BARS ── */
+.task-bar {
+  position: absolute; height: 22px; border-radius: 4px;
+  display: flex; align-items: center; padding: 0 7px;
+  font-size: 10px; font-weight: 500; cursor: grab;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: box-shadow .1s, opacity .1s; user-select: none; z-index: 3;
+  font-family: var(--sans); letter-spacing: .01em;
+}
+.task-bar:hover { box-shadow: 0 0 0 2px rgba(255,255,255,.3); z-index: 10; }
+.task-bar.dragging { opacity: .5; cursor: grabbing; z-index: 20; }
+.task-bar.dep-err { box-shadow: 0 0 0 2px var(--red) !important; }
+.task-bar.cascade-child { box-shadow: 0 0 0 2px var(--amber) !important; }
+
+/* ── CAP ROWS ── */
+.cap-section-hdr {
+  height: 26px; display: flex; align-items: center; padding: 0 0 0 12px;
+  font-size: 9px; font-weight: 500; color: var(--text3);
+  letter-spacing: .06em; text-transform: uppercase;
+  border-bottom: 1px solid var(--border); border-top: 1px solid var(--border);
+  background: var(--bg2); position: sticky; left: 0;
+}
+.cap-row { height: 24px; display: flex; border-bottom: 1px solid var(--border); }
+.cap-cell {
+  width: var(--ww); flex-shrink: 0; height: 100%;
+  border-right: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center; gap: 2px;
+}
+.cap-bar { height: 10px; border-radius: 2px; min-width: 2px; transition: width .2s; }
+.cap-num { font-size: 8px; font-family: var(--mono); font-weight: 500; }
+
+/* ── TOOLTIP ── */
+.tt {
+  position: fixed; background: var(--bg3); border: 1px solid var(--border2);
+  border-radius: 8px; padding: 10px 12px; font-size: 11px;
+  z-index: 999; display: none; min-width: 180px; pointer-events: none;
+  box-shadow: 0 8px 32px rgba(0,0,0,.5);
+}
+.tt-title { font-weight: 500; margin-bottom: 6px; font-size: 12px; }
+.tt-row { display: flex; justify-content: space-between; gap: 14px; color: var(--text2); margin-top: 3px; }
+.tt-row span:last-child { color: var(--text); font-family: var(--mono); font-size: 10px; }
+.tt-warn { font-size: 10px; color: var(--red); margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
+.tt-cascade { font-size: 10px; color: var(--amber); margin-top: 4px; }
+
+/* ── MODALS ── */
+.modal-bg {
+  position: fixed; inset: 0; background: rgba(0,0,0,.7);
+  display: none; align-items: center; justify-content: center; z-index: 100;
+  backdrop-filter: blur(4px);
+}
+.modal-bg.show { display: flex; }
+.modal {
+  background: var(--bg2); border: 1px solid var(--border2);
+  border-radius: 12px; width: 540px; max-width: 95vw;
+  max-height: 80vh; display: flex; flex-direction: column;
+  box-shadow: 0 24px 80px rgba(0,0,0,.6);
+}
+.modal-hdr {
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+}
+.modal-title { font-size: 14px; font-weight: 500; }
+.modal-sub { font-size: 11px; color: var(--text2); margin-top: 2px; }
+.modal-body { padding: 20px; overflow-y: auto; flex: 1; }
+.modal-footer { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; flex-shrink: 0; }
+
+/* ── FORM ELEMENTS ── */
+.field { margin-bottom: 16px; }
+.field label { display: block; font-size: 10px; font-weight: 500; color: var(--text2); letter-spacing: .06em; text-transform: uppercase; margin-bottom: 6px; }
+.field input, .field select {
+  width: 100%; background: var(--bg3); border: 1px solid var(--border2);
+  border-radius: 6px; padding: 8px 10px; color: var(--text);
+  font-family: var(--sans); font-size: 12px;
+  transition: border-color .15s;
+}
+.field input:focus, .field select:focus { outline: none; border-color: var(--accent); }
+.field input::placeholder { color: var(--text3); }
+.field-hint { font-size: 10px; color: var(--text3); margin-top: 4px; }
+
+/* ── PLAN LIST ── */
+.plan-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.plan-item {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 8px; cursor: pointer; transition: all .15s;
+}
+.plan-item:hover { border-color: var(--border2); background: var(--bg4); }
+.plan-item.selected { border-color: var(--accent); background: rgba(91,127,255,.08); }
+.plan-item-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.plan-item-name { font-size: 12px; flex: 1; }
+.plan-item-id { font-size: 9px; color: var(--text3); font-family: var(--mono); }
+.plan-item-check { width: 16px; height: 16px; border-radius: 4px; border: 1px solid var(--border2); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.plan-item.selected .plan-item-check { background: var(--accent); border-color: var(--accent); }
+
+/* ── AUTH SCREEN ── */
+.auth-screen {
+  position: fixed; inset: 0; background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 50; flex-direction: column; gap: 0;
+}
+.auth-card {
+  background: var(--bg2); border: 1px solid var(--border2);
+  border-radius: 16px; padding: 36px 40px; width: 440px; max-width: 95vw;
+}
+.auth-logo { margin-bottom: 24px; }
+.auth-title { font-size: 20px; font-weight: 500; margin-bottom: 6px; }
+.auth-sub { font-size: 12px; color: var(--text2); margin-bottom: 28px; line-height: 1.6; }
+.auth-steps { margin-bottom: 24px; }
+.auth-step { display: flex; gap: 12px; margin-bottom: 14px; align-items: flex-start; }
+.auth-step-num {
+  width: 22px; height: 22px; border-radius: 50%; background: var(--bg4);
+  border: 1px solid var(--border2); display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-family: var(--mono); color: var(--text2); flex-shrink: 0; margin-top: 1px;
+}
+.auth-step-text { font-size: 11px; color: var(--text2); line-height: 1.6; }
+.auth-step-text strong { color: var(--text); font-weight: 500; }
+.auth-step-text code { background: var(--bg4); padding: 1px 5px; border-radius: 3px; font-family: var(--mono); font-size: 10px; color: var(--accent); }
+.demo-link { text-align: center; margin-top: 14px; }
+.demo-link a { font-size: 11px; color: var(--text3); cursor: pointer; text-decoration: underline; }
+.demo-link a:hover { color: var(--text2); }
+
+/* ── SAVE PROGRESS ── */
+.save-progress {
+  display: none; position: fixed; bottom: 20px; right: 20px;
+  background: var(--bg2); border: 1px solid var(--border2);
+  border-radius: 10px; padding: 12px 16px; min-width: 240px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.5); z-index: 90;
+}
+.save-progress.show { display: block; }
+.save-title { font-size: 11px; font-weight: 500; margin-bottom: 8px; }
+.save-bar-bg { height: 4px; background: var(--bg4); border-radius: 2px; overflow: hidden; }
+.save-bar-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width .3s; }
+.save-status { font-size: 10px; color: var(--text2); margin-top: 6px; font-family: var(--mono); }
+
+/* ── EMPTY STATE ── */
+.empty-state {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  flex: 1; gap: 12px; color: var(--text3); padding: 40px;
+}
+.empty-icon { font-size: 32px; opacity: .4; }
+.empty-title { font-size: 14px; font-weight: 500; color: var(--text2); }
+.empty-sub { font-size: 11px; text-align: center; max-width: 280px; line-height: 1.6; }
+
+/* ── LOADING ── */
+.loading-row {
+  height: var(--row); display: flex; align-items: center; padding: 0 16px;
+  gap: 10px; border-bottom: 1px solid var(--border);
+}
+.skeleton { background: var(--bg3); border-radius: 4px; animation: pulse 1.5s infinite; }
+@keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:.8} }
+
+/* ── STAT PILLS ── */
+.stat-row { display: flex; gap: 8px; margin-left: auto; }
+.stat-pill {
+  display: flex; align-items: center; gap: 5px; padding: 3px 10px;
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 20px;
+  font-size: 10px; font-family: var(--mono);
+}
+.stat-pill .stat-val { font-weight: 500; }
+.stat-pill.warn .stat-val { color: var(--amber); }
+.stat-pill.err .stat-val { color: var(--red); }
+.stat-pill.ok .stat-val { color: var(--green); }
+</style>
+</head>
+<body>
+
+<!-- AUTH SCREEN -->
+<div class="auth-screen" id="auth-screen">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+        <rect width="32" height="32" rx="8" fill="rgba(91,127,255,.15)"/>
+        <rect x="8" y="8" width="6" height="6" rx="1.5" fill="#5b7fff"/>
+        <rect x="18" y="8" width="6" height="6" rx="1.5" fill="#5b7fff" opacity=".6"/>
+        <rect x="8" y="18" width="6" height="6" rx="1.5" fill="#5b7fff" opacity=".6"/>
+        <rect x="18" y="18" width="6" height="6" rx="1.5" fill="#5b7fff" opacity=".3"/>
+      </svg>
+    </div>
+    <div class="auth-title">Portfolio Capaciteitsplanning</div>
+    <div class="auth-sub">Verbind met Microsoft Planner via Azure App Registration om je echte projectdata te laden.</div>
+    <div class="auth-steps">
+      <div class="auth-step">
+        <div class="auth-step-num">1</div>
+        <div class="auth-step-text">Maak een <strong>App Registration</strong> aan in Azure Portal met permissies <code>Tasks.ReadWrite</code> en <code>Group.Read.All</code></div>
+      </div>
+      <div class="auth-step">
+        <div class="auth-step-num">2</div>
+        <div class="auth-step-text">Voeg <code>https://localhost</code> toe als <strong>Redirect URI</strong> (type: Single-page application)</div>
+      </div>
+      <div class="auth-step">
+        <div class="auth-step-num">3</div>
+        <div class="auth-step-text">Plak je <strong>Client ID</strong> en <strong>Tenant ID</strong> hieronder</div>
+      </div>
+    </div>
+    <div class="field">
+      <label>Client ID (Application ID)</label>
+      <input type="text" id="inp-client" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+    </div>
+    <div class="field" style="margin-bottom:20px">
+      <label>Tenant ID</label>
+      <input type="text" id="inp-tenant" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+    </div>
+    <button class="btn btn-accent" style="width:100%;padding:9px" onclick="connectMSAL()">Verbinden met Microsoft</button>
+    <div class="demo-link"><a onclick="loadDemo()">Of open in demo-modus met voorbeelddata →</a></div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app" style="display:none">
+
+  <!-- HEADER -->
+  <div class="hdr">
+    <div class="hdr-logo">
+      <svg width="22" height="22" viewBox="0 0 32 32" fill="none">
+        <rect width="32" height="32" rx="8" fill="rgba(91,127,255,.2)"/>
+        <rect x="8" y="8" width="6" height="6" rx="1.5" fill="#5b7fff"/>
+        <rect x="18" y="8" width="6" height="6" rx="1.5" fill="#5b7fff" opacity=".6"/>
+        <rect x="8" y="18" width="6" height="6" rx="1.5" fill="#5b7fff" opacity=".6"/>
+        <rect x="18" y="18" width="6" height="6" rx="1.5" fill="#5b7fff" opacity=".3"/>
+      </svg>
+      <div class="hdr-title">Portfolio Capaciteitsplanning <span>/ Group Induver ICT</span></div>
+    </div>
+    <div class="hdr-right">
+      <span id="conn-badge" class="badge badge-demo">demo</span>
+      <button class="btn btn-sm" onclick="showConfigModal()">⚙ Plans configureren</button>
+      <button class="btn btn-sm" id="btn-reload" onclick="reloadData()" style="display:none">↺ Herladen</button>
+      <button class="btn btn-sm btn-danger" onclick="disconnect()" style="display:none" id="btn-disconnect">Afmelden</button>
+    </div>
+  </div>
+
+  <!-- BANNERS -->
+  <div class="banner banner-err" id="ban-err"><span>⚠</span><span id="ban-err-msg"></span></div>
+  <div class="banner banner-ok" id="ban-ok"><span>✓</span><span id="ban-ok-msg"></span></div>
+  <div class="banner banner-info" id="ban-info"><span>ℹ</span><span id="ban-info-msg"></span></div>
+  <div class="banner banner-warn" id="ban-warn"><span>⚠</span><span id="ban-warn-msg"></span></div>
+
+  <!-- TOOLBAR -->
+  <div class="toolbar">
+    <div class="legend-item"><div class="leg-dot" style="background:var(--alpha-blue)"></div>Alpha</div>
+    <div class="legend-item"><div class="leg-dot" style="background:var(--beta-green)"></div>Beta</div>
+    <div class="legend-item"><div class="leg-dot" style="background:var(--gamma-amber)"></div>Gamma</div>
+    <div class="legend-item"><div class="leg-dot" style="background:var(--delta-pink)"></div>Delta</div>
+    <div class="toolbar-sep"></div>
+    <span id="mode-badge" class="badge badge-free">Vrij slepen</span>
+    <button class="btn btn-sm" id="btn-cascade" onclick="toggleCascade()">Cascade aan</button>
+    <div class="toolbar-sep"></div>
+    <button class="btn btn-sm btn-accent" onclick="autoOptimize()">✦ Auto-optimaliseer</button>
+    <button class="btn btn-sm" onclick="resetAll()">↺ Reset</button>
+    <div class="toolbar-right">
+      <div class="stat-row" id="stats-row"></div>
+      <div class="toolbar-sep"></div>
+      <button class="btn btn-sm btn-green" id="btn-save" onclick="saveToplanner()" style="display:none">↑ Opslaan in Planner</button>
+    </div>
+  </div>
+
+  <!-- BODY -->
+  <div class="body-wrap">
+    <!-- PEOPLE SIDEBAR -->
+    <div class="people-col">
+      <div class="col-hdr">Teamlid</div>
+      <div id="people-list" class="people-list"></div>
+      <div class="cap-lbl-hdr">Uren / week</div>
+      <div id="cap-lbl-col"></div>
+    </div>
+    <!-- GANTT -->
+    <div class="gantt-wrap" id="gantt-wrap">
+      <div class="gantt-inner" id="gantt-inner">
+        <div class="weeks-row" id="weeks-row"></div>
+        <div class="gantt-rows-wrap" id="gantt-rows-wrap"></div>
+        <div class="cap-section-hdr">Capaciteit per week</div>
+        <div id="cap-rows-wrap"></div>
+      </div>
+      <div class="empty-state" id="empty-state" style="display:none">
+        <div class="empty-icon">◫</div>
+        <div class="empty-title">Geen plans geselecteerd</div>
+        <div class="empty-sub">Klik op "Plans configureren" om Planner-plans toe te voegen aan dit dashboard.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TOOLTIP -->
+<div class="tt" id="tt"></div>
+
+<!-- CONFIG MODAL -->
+<div class="modal-bg" id="modal-config">
+  <div class="modal">
+    <div class="modal-hdr">
+      <div>
+        <div class="modal-title">Plans configureren</div>
+        <div class="modal-sub">Selecteer welke Planner-plans in scope zijn voor dit dashboard</div>
+      </div>
+      <button class="btn btn-sm" onclick="closeModal('modal-config')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label>Zoek plans</label>
+        <input type="text" id="plan-search" placeholder="Zoek op naam..." oninput="searchPlans()" />
+      </div>
+      <div id="plan-list-loading" style="color:var(--text3);font-size:11px;display:none">Laden...</div>
+      <div class="plan-list" id="plan-list"></div>
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+        <div style="font-size:10px;color:var(--text3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em;font-weight:500">Of voeg manueel toe via Plan ID</div>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="inp-manual-id" placeholder="Plan ID (uit Planner URL)" style="flex:1;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-family:var(--sans);font-size:12px" />
+          <input type="text" id="inp-manual-name" placeholder="Naam" style="width:130px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-family:var(--sans);font-size:12px" />
+          <button class="btn btn-sm" onclick="addManualPlan()">Toevoegen</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <span style="font-size:11px;color:var(--text3);margin-right:auto" id="selected-count">0 plans geselecteerd</span>
+      <button class="btn" onclick="closeModal('modal-config')">Annuleren</button>
+      <button class="btn btn-accent" onclick="applyConfig()">Toepassen</button>
+    </div>
+  </div>
+</div>
+
+<!-- SAVE PROGRESS -->
+<div class="save-progress" id="save-progress">
+  <div class="save-title">Opslaan in Planner...</div>
+  <div class="save-bar-bg"><div class="save-bar-fill" id="save-bar" style="width:0%"></div></div>
+  <div class="save-status" id="save-status">0 / 0 taken bijgewerkt</div>
+</div>
+
+<script>
+// ── MSAL / AUTH ──────────────────────────────────────────────────────────────
+let msalApp = null, accessToken = null, isDemo = false;
+let cascadeMode = false;
+let tasks = [], people = [], selectedPlanIds = [], allPlans = [];
+let origTasks = [];
+let changedTaskIds = new Set();
+
+const WEEKS = 14;
+const WW = 64;
+const ROW = 52;
+const MAX_HRS = 8;
+const HRS_PER_TASK_WEEK = 5;
+const START = new Date(2026, 3, 13);
+
+const PROJ_COLORS = ['#378ADD','#1D9E75','#BA7517','#C2446E','#7B5EA7','#2E9CB5','#C06B35','#4A8C5C'];
+
+function weekLabel(i) {
+  const d = new Date(START); d.setDate(d.getDate() + i * 7);
+  return { date: String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0'), week: 'W' + (i+1) };
+}
+
+// ── MSAL CONNECT ─────────────────────────────────────────────────────────────
+async function connectMSAL() {
+  const clientId = document.getElementById('inp-client').value.trim();
+  const tenantId = document.getElementById('inp-tenant').value.trim();
+  if (!clientId || !tenantId) { alert('Vul Client ID en Tenant ID in.'); return; }
+
+  const script = document.createElement('script');
+  script.src = 'https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/lib/msal-browser.min.js';
+  script.onload = async () => {
+    try {
+      msalApp = new msal.PublicClientApplication({
+        auth: { clientId, authority: `https://login.microsoftonline.com/${tenantId}`, redirectUri: 'https://induver.sharepoint.com/:u:/r/sites/Projects/Gedeelde%20documenten/planner-dashboard.html?csf=1&web=1&e=A0CMap' }
+      });
+      await msalApp.initialize();
+      const resp = await msalApp.loginPopup({ scopes: ['Tasks.ReadWrite','Group.Read.All','User.Read'] });
+      accessToken = resp.accessToken;
+      isDemo = false;
+      document.getElementById('conn-badge').className = 'badge badge-connected';
+      document.getElementById('conn-badge').textContent = resp.account.username;
+      document.getElementById('btn-disconnect').style.display = '';
+      document.getElementById('btn-reload').style.display = '';
+      document.getElementById('btn-save').style.display = '';
+      localStorage.setItem('planner_client', clientId);
+      localStorage.setItem('planner_tenant', tenantId);
+      showApp();
+      await loadPlannerPlans();
+    } catch(e) { alert('Aanmelden mislukt: ' + e.message); }
+  };
+  document.head.appendChild(script);
+}
+
+async function getToken() {
+  if (isDemo) return null;
+  const clientId = localStorage.getItem('planner_client');
+  const tenantId = localStorage.getItem('planner_tenant');
+  if (!msalApp) return null;
+  const accounts = msalApp.getAllAccounts();
+  if (!accounts.length) return null;
+  try {
+    const r = await msalApp.acquireTokenSilent({ scopes: ['Tasks.ReadWrite','Group.Read.All'], account: accounts[0] });
+    return r.accessToken;
+  } catch { return null; }
+}
+
+function disconnect() {
+  localStorage.removeItem('planner_client');
+  localStorage.removeItem('planner_tenant');
+  localStorage.removeItem('planner_selected_plans');
+  window.location.reload();
+}
+
+function showApp() {
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+}
+
+// ── DEMO MODE ────────────────────────────────────────────────────────────────
+function loadDemo() {
+  isDemo = true;
+  document.getElementById('conn-badge').className = 'badge badge-demo';
+  document.getElementById('conn-badge').textContent = 'demo';
+  showApp();
+  loadDemoData();
+}
+
+function loadDemoData() {
+  people = [
+    { id: 'ann', name: 'Ann Claes', role: 'Analist', bg: 'rgba(55,138,221,.2)', tx: '#8ab8ed' },
+    { id: 'ben', name: 'Ben Martens', role: 'Developer', bg: 'rgba(29,158,117,.2)', tx: '#6dc9a8' },
+    { id: 'clo', name: 'Clo Pieters', role: 'PM', bg: 'rgba(186,117,23,.2)', tx: '#d4a060' },
+    { id: 'dir', name: 'Dirk Smeets', role: 'Architect', bg: 'rgba(194,68,110,.2)', tx: '#e08aab' },
+  ];
+  const raw = [
+    { id:'t1', pid:'ann', proj:'Alpha', lbl:'Requirements', s:0, d:2, c:PROJ_COLORS[0], deps:[], planId:'p1' },
+    { id:'t2', pid:'ann', proj:'Beta',  lbl:'Analyse',      s:3, d:3, c:PROJ_COLORS[1], deps:['t1'], planId:'p2' },
+    { id:'t3', pid:'ann', proj:'Gamma', lbl:'Review',       s:7, d:2, c:PROJ_COLORS[2], deps:['t2'], planId:'p3' },
+    { id:'t4', pid:'ben', proj:'Alpha', lbl:'Ontwikkeling', s:2, d:4, c:PROJ_COLORS[0], deps:['t1'], planId:'p1' },
+    { id:'t5', pid:'ben', proj:'Delta', lbl:'Integratie',   s:7, d:3, c:PROJ_COLORS[3], deps:['t4'], planId:'p4' },
+    { id:'t6', pid:'ben', proj:'Beta',  lbl:'Unit tests',   s:5, d:2, c:PROJ_COLORS[1], deps:['t4'], planId:'p2' },
+    { id:'t7', pid:'clo', proj:'Alpha', lbl:'Planning',     s:0, d:1, c:PROJ_COLORS[0], deps:[], planId:'p1' },
+    { id:'t8', pid:'clo', proj:'Beta',  lbl:'Kickoff',      s:1, d:1, c:PROJ_COLORS[1], deps:['t7'], planId:'p2' },
+    { id:'t9', pid:'clo', proj:'Gamma', lbl:'Opvolging',    s:4, d:3, c:PROJ_COLORS[2], deps:['t8'], planId:'p3' },
+    { id:'t10',pid:'clo', proj:'Delta', lbl:'Afsluiting',   s:8, d:2, c:PROJ_COLORS[3], deps:['t9'], planId:'p4' },
+    { id:'t11',pid:'dir', proj:'Alpha', lbl:'Architectuur', s:0, d:3, c:PROJ_COLORS[0], deps:[], planId:'p1' },
+    { id:'t12',pid:'dir', proj:'Gamma', lbl:'Tech design',  s:3, d:2, c:PROJ_COLORS[2], deps:['t11'], planId:'p3' },
+    { id:'t13',pid:'dir', proj:'Delta', lbl:'Review arch.', s:6, d:2, c:PROJ_COLORS[3], deps:['t12'], planId:'p4' },
+    { id:'t14',pid:'dir', proj:'Beta',  lbl:'Advies',       s:8, d:2, c:PROJ_COLORS[1], deps:['t13'], planId:'p2' },
+  ];
+  tasks = raw;
+  origTasks = raw.map(t => ({ ...t }));
+  changedTaskIds = new Set();
+  render();
+  showBanner('info', 'Demo-modus actief — wijzigingen worden niet opgeslagen in Planner. Verbind met Microsoft om echte data te laden.');
+}
+
+// ── GRAPH API ────────────────────────────────────────────────────────────────
+async function graphGet(url) {
+  const token = await getToken();
+  const r = await fetch('https://graph.microsoft.com/v1.0/' + url, {
+    headers: { Authorization: 'Bearer ' + token }
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+async function graphPatch(url, body, etag) {
+  const token = await getToken();
+  const r = await fetch('https://graph.microsoft.com/v1.0/' + url, {
+    method: 'PATCH',
+    headers: {
+      Authorization: 'Bearer ' + token,
+      'Content-Type': 'application/json',
+      'If-Match': etag
+    },
+    body: JSON.stringify(body)
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.status === 204 ? {} : r.json();
+}
+
+async function loadPlannerPlans() {
+  showBanner('info', 'Plans ophalen uit Microsoft Planner...');
+  try {
+    const data = await graphGet('me/planner/plans');
+    allPlans = (data.value || []).map((p, i) => ({
+      id: p.id, name: p.title,
+      color: PROJ_COLORS[i % PROJ_COLORS.length]
+    }));
+    const saved = JSON.parse(localStorage.getItem('planner_selected_plans') || '[]');
+    selectedPlanIds = saved.length ? saved : allPlans.slice(0, 4).map(p => p.id);
+    renderPlanList();
+    await loadTasksForPlans();
+  } catch(e) {
+    showBanner('err', 'Fout bij laden van plans: ' + e.message);
+  }
+}
+
+async function loadTasksForPlans() {
+  if (!selectedPlanIds.length) { tasks = []; origTasks = []; render(); return; }
+  showBanner('info', `Taken ophalen voor ${selectedPlanIds.length} plan(s)...`);
+  try {
+    const allTasks = [];
+    const peopleMap = {};
+    for (const planId of selectedPlanIds) {
+      const plan = allPlans.find(p => p.id === planId);
+      const [tasksData, membersData] = await Promise.all([
+        graphGet(`planner/plans/${planId}/tasks`),
+        graphGet(`planner/plans/${planId}/members`)
+      ]);
+      (tasksData.value || []).forEach(t => {
+        const assignees = Object.keys(t.assignments || {});
+        assignees.forEach(uid => { if (!peopleMap[uid]) peopleMap[uid] = { id: uid }; });
+        const startW = t.startDateTime ? Math.max(0, Math.round((new Date(t.startDateTime) - START) / (7*24*3600*1000))) : Math.floor(Math.random()*8);
+        const endW = t.dueDateTime ? Math.max(0, Math.round((new Date(t.dueDateTime) - START) / (7*24*3600*1000))) : startW + 2;
+        const dur = Math.max(1, endW - startW);
+        allTasks.push({
+          id: t.id, pid: assignees[0] || 'unassigned',
+          proj: plan ? plan.name : planId,
+          lbl: t.title, s: Math.max(0, startW), d: dur,
+          c: plan ? plan.color : '#888', deps: [],
+          planId, etag: t['@odata.etag'] || null
+        });
+      });
+      (membersData.value || []).forEach(m => {
+        if (!peopleMap[m.id]) peopleMap[m.id] = { id: m.id, name: m.displayName || m.id };
+        else peopleMap[m.id].name = m.displayName || m.id;
+      });
+    }
+    // Resolve user display names
+    const uids = Object.keys(peopleMap).slice(0, 20);
+    for (const uid of uids) {
+      try {
+        const u = await graphGet(`users/${uid}?$select=displayName,jobTitle`);
+        peopleMap[uid] = { ...peopleMap[uid], name: u.displayName, role: u.jobTitle || '' };
+      } catch {}
+    }
+    const AVBGS = ['rgba(55,138,221,.2)','rgba(29,158,117,.2)','rgba(186,117,23,.2)','rgba(194,68,110,.2)','rgba(123,94,167,.2)','rgba(46,156,181,.2)'];
+    const AVTX = ['#8ab8ed','#6dc9a8','#d4a060','#e08aab','#b89fd4','#7ccfdf'];
+    people = Object.values(peopleMap).map((p, i) => ({
+      ...p, bg: AVBGS[i % AVBGS.length], tx: AVTX[i % AVTX.length],
+      name: p.name || p.id.substring(0,8)
+    }));
+    tasks = allTasks.filter(t => t.pid !== 'unassigned' && people.find(p => p.id === t.pid));
+    origTasks = tasks.map(t => ({ ...t }));
+    changedTaskIds = new Set();
+    hideBanners();
+    showBanner('ok', `${tasks.length} taken geladen voor ${selectedPlanIds.length} plan(s).`);
+    render();
+  } catch(e) {
+    showBanner('err', 'Fout bij laden taken: ' + e.message);
+  }
+}
+
+async function reloadData() { await loadTasksForPlans(); }
+
+// ── SAVE TO PLANNER ──────────────────────────────────────────────────────────
+async function saveToplanner() {
+  if (isDemo) { showBanner('warn', 'Demo-modus: verbind met Microsoft om wijzigingen op te slaan.'); return; }
+  const changed = tasks.filter(t => changedTaskIds.has(t.id));
+  if (!changed.length) { showBanner('info', 'Geen wijzigingen om op te slaan.'); return; }
+
+  const prog = document.getElementById('save-progress');
+  const bar = document.getElementById('save-bar');
+  const status = document.getElementById('save-status');
+  prog.classList.add('show');
+
+  let done = 0, failed = 0;
+  for (const t of changed) {
+    status.textContent = `${done + failed} / ${changed.length} taken`;
+    bar.style.width = Math.round((done + failed) / changed.length * 100) + '%';
+    try {
+      // Step 1: get fresh ETag
+      const fresh = await graphGet(`planner/tasks/${t.id}`);
+      const etag = fresh['@odata.etag'];
+      // Step 2: calculate dates
+      const startDate = new Date(START); startDate.setDate(startDate.getDate() + t.s * 7);
+      const dueDate = new Date(START); dueDate.setDate(dueDate.getDate() + (t.s + t.d) * 7);
+      await graphPatch(`planner/tasks/${t.id}`, {
+        startDateTime: startDate.toISOString(),
+        dueDateTime: dueDate.toISOString()
+      }, etag);
+      done++;
+    } catch(e) { failed++; console.error(t.lbl, e); }
+    await new Promise(r => setTimeout(r, 300)); // rate limit
+  }
+
+  bar.style.width = '100%';
+  status.textContent = `${done} bijgewerkt${failed ? ', ' + failed + ' mislukt' : ''}`;
+  setTimeout(() => prog.classList.remove('show'), 3000);
+
+  changedTaskIds = new Set();
+  if (failed) showBanner('err', `${done} taken opgeslagen, ${failed} mislukt. Controleer de console.`);
+  else showBanner('ok', `${done} taken succesvol bijgewerkt in Planner.`);
+}
+
+// ── CONFIG MODAL ─────────────────────────────────────────────────────────────
+function showConfigModal() {
+  renderPlanList();
+  document.getElementById('modal-config').classList.add('show');
+}
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+
+function renderPlanList(filter = '') {
+  const list = document.getElementById('plan-list');
+  const filtered = allPlans.filter(p => p.name.toLowerCase().includes(filter.toLowerCase()));
+  list.innerHTML = filtered.map(p => `
+    <div class="plan-item ${selectedPlanIds.includes(p.id) ? 'selected' : ''}" onclick="togglePlan('${p.id}')">
+      <div class="plan-item-dot" style="background:${p.color}"></div>
+      <div style="flex:1;min-width:0">
+        <div class="plan-item-name">${p.name}</div>
+        <div class="plan-item-id">${p.id.substring(0,20)}...</div>
+      </div>
+      <div class="plan-item-check">${selectedPlanIds.includes(p.id) ? '<svg width="10" height="8" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1" stroke="white" stroke-width="1.5" fill="none"/></svg>' : ''}</div>
+    </div>`).join('');
+  document.getElementById('selected-count').textContent = selectedPlanIds.length + ' plans geselecteerd';
+
+  if (isDemo && !allPlans.length) {
+    allPlans = [
+      { id:'p1', name:'Project Alpha', color:PROJ_COLORS[0] },
+      { id:'p2', name:'Project Beta',  color:PROJ_COLORS[1] },
+      { id:'p3', name:'Project Gamma', color:PROJ_COLORS[2] },
+      { id:'p4', name:'Project Delta', color:PROJ_COLORS[3] },
+    ];
+    selectedPlanIds = ['p1','p2','p3','p4'];
+    renderPlanList(filter);
+  }
+}
+
+function searchPlans() { renderPlanList(document.getElementById('plan-search').value); }
+
+function togglePlan(id) {
+  if (selectedPlanIds.includes(id)) selectedPlanIds = selectedPlanIds.filter(x => x !== id);
+  else selectedPlanIds.push(id);
+  renderPlanList(document.getElementById('plan-search').value);
+}
+
+function addManualPlan() {
+  const id = document.getElementById('inp-manual-id').value.trim();
+  const name = document.getElementById('inp-manual-name').value.trim() || id;
+  if (!id) return;
+  if (!allPlans.find(p => p.id === id)) {
+    allPlans.push({ id, name, color: PROJ_COLORS[allPlans.length % PROJ_COLORS.length] });
+  }
+  if (!selectedPlanIds.includes(id)) selectedPlanIds.push(id);
+  document.getElementById('inp-manual-id').value = '';
+  document.getElementById('inp-manual-name').value = '';
+  renderPlanList();
+}
+
+async function applyConfig() {
+  localStorage.setItem('planner_selected_plans', JSON.stringify(selectedPlanIds));
+  closeModal('modal-config');
+  if (!isDemo) await loadTasksForPlans();
+  else { loadDemoData(); }
+}
+
+// ── LOGIC ────────────────────────────────────────────────────────────────────
+function calcCap() {
+  const c = {}; people.forEach(p => { c[p.id] = Array(WEEKS).fill(0); });
+  tasks.forEach(t => { for (let w = t.s; w < t.s + t.d && w < WEEKS; w++) c[t.pid][w] += HRS_PER_TASK_WEEK; });
+  return c;
+}
+
+function depViolations() {
+  const v = new Set();
+  tasks.forEach(t => { t.deps.forEach(did => { const d = tasks.find(x => x.id === did); if (d && t.s < d.s + d.d) v.add(t.id); }); });
+  return v;
+}
+
+function getCascadeChildren(tid) {
+  const result = new Set(); const queue = [tid];
+  while (queue.length) {
+    const cur = queue.shift();
+    tasks.forEach(t => { if (t.deps.includes(cur) && !result.has(t.id)) { result.add(t.id); queue.push(t.id); } });
+  }
+  return result;
+}
+
+function markChanged(tid) { changedTaskIds.add(tid); updateSaveBtn(); }
+function updateSaveBtn() {
+  const btn = document.getElementById('btn-save');
+  if (btn) {
+    btn.textContent = changedTaskIds.size > 0 ? `↑ Opslaan in Planner (${changedTaskIds.size})` : '↑ Opslaan in Planner';
+    btn.style.opacity = changedTaskIds.size > 0 ? '1' : '.6';
+  }
+}
+
+function toggleCascade() {
+  cascadeMode = !cascadeMode;
+  document.getElementById('btn-cascade').textContent = cascadeMode ? 'Cascade uit' : 'Cascade aan';
+  document.getElementById('mode-badge').className = 'badge ' + (cascadeMode ? 'badge-cascade' : 'badge-free');
+  document.getElementById('mode-badge').textContent = cascadeMode ? 'Cascade modus' : 'Vrij slepen';
+}
+
+function autoOptimize() {
+  const sorted = [...tasks].sort((a, b) => a.s - b.s);
+  const ns = {}; const used = {}; people.forEach(p => { used[p.id] = Array(WEEKS + 20).fill(0); });
+  function earliest(t) {
+    let e = 0;
+    t.deps.forEach(did => { const d = tasks.find(x => x.id === did); if (d) { const de = (ns[did] !== undefined ? ns[did] : d.s) + d.d; if (de > e) e = de; } });
+    return e;
+  }
+  sorted.forEach(t => {
+    const e = earliest(t);
+    let best = e;
+    for (let s = e; s <= WEEKS; s++) {
+      let ok = true;
+      for (let w = s; w < s + t.d; w++) { if ((used[t.pid][w] || 0) + HRS_PER_TASK_WEEK > MAX_HRS) { ok = false; break; } }
+      if (ok) { best = s; break; }
+    }
+    ns[t.id] = best;
+    for (let w = best; w < best + t.d; w++) used[t.pid][w] = (used[t.pid][w] || 0) + HRS_PER_TASK_WEEK;
+  });
+  tasks.forEach(t => { if (ns[t.id] !== undefined) { const newS = Math.min(ns[t.id], WEEKS - t.d); if (newS !== t.s) { t.s = newS; markChanged(t.id); } } });
+  showBanner('ok', 'Plan geoptimaliseerd — afhankelijkheden gerespecteerd, overbelasting geminimaliseerd.');
+  render();
+}
+
+function resetAll() {
+  tasks = origTasks.map(t => ({ ...t }));
+  changedTaskIds = new Set();
+  updateSaveBtn();
+  hideBanners();
+  render();
+}
+
+// ── BANNERS ──────────────────────────────────────────────────────────────────
+function showBanner(type, msg) {
+  hideBanners();
+  const el = document.getElementById('ban-' + type);
+  if (!el) return;
+  document.getElementById('ban-' + type + '-msg').textContent = msg;
+  el.classList.add('show');
+  if (type === 'ok') setTimeout(() => el.classList.remove('show'), 4000);
+}
+function hideBanners() {
+  ['err','ok','info','warn'].forEach(t => { const el = document.getElementById('ban-' + t); if (el) el.classList.remove('show'); });
+}
+
+// ── RENDER ───────────────────────────────────────────────────────────────────
+function render() {
+  if (!tasks.length && !people.length) {
+    document.getElementById('empty-state').style.display = 'flex';
+    document.getElementById('gantt-inner').style.display = 'none';
+    return;
+  }
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('gantt-inner').style.display = 'flex';
+
+  const cap = calcCap();
+  const viol = depViolations();
+  const totalW = WEEKS * WW;
+
+  // Stats
+  let overloads = 0, depErrs = 0;
+  people.forEach(p => cap[p.id].forEach(h => { if (h > MAX_HRS) overloads++; }));
+  depErrs = viol.size;
+  const statsRow = document.getElementById('stats-row');
+  if (statsRow) {
+    statsRow.innerHTML = `
+      <div class="stat-pill ${overloads > 0 ? 'err' : 'ok'}"><span class="stat-val">${overloads}</span><span style="color:var(--text3)">overbelastingen</span></div>
+      <div class="stat-pill ${depErrs > 0 ? 'warn' : 'ok'}"><span class="stat-val">${depErrs}</span><span style="color:var(--text3)">dep-conflicten</span></div>
+    `;
+  }
+
+  // Conflict banner
+  if (overloads > 0 || depErrs > 0) {
+    const msgs = [];
+    if (overloads) msgs.push(`${overloads} capaciteitsproblemen`);
+    if (depErrs) msgs.push(`${depErrs} afhankelijkheidsconflicten`);
+    showBanner('err', msgs.join(' · ') + ' — sleep taken of klik Auto-optimaliseer');
+  } else {
+    const ban = document.getElementById('ban-err');
+    if (ban && ban.classList.contains('show')) ban.classList.remove('show');
+  }
+
+  // Week headers
+  const wr = document.getElementById('weeks-row');
+  wr.innerHTML = ''; wr.style.minWidth = totalW + 'px';
+  for (let w = 0; w < WEEKS; w++) {
+    const lbl = weekLabel(w);
+    const wc = document.createElement('div');
+    wc.className = 'week-cell';
+    wc.style.width = WW + 'px';
+    wc.innerHTML = `<span class="wdate">${lbl.date}</span><span>${lbl.week}</span>`;
+    wr.appendChild(wc);
+  }
+
+  // People sidebar + gantt rows
+  const pList = document.getElementById('people-list');
+  const capLblCol = document.getElementById('cap-lbl-col');
+  const ganttRowsWrap = document.getElementById('gantt-rows-wrap');
+  const capRowsWrap = document.getElementById('cap-rows-wrap');
+  pList.innerHTML = ''; capLblCol.innerHTML = ''; ganttRowsWrap.innerHTML = ''; capRowsWrap.innerHTML = '';
+
+  const depSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  depSvg.setAttribute('class', 'dep-svg');
+  depSvg.style.width = totalW + 'px';
+  depSvg.style.height = (people.length * ROW) + 'px';
+  depSvg.style.position = 'absolute';
+  ganttRowsWrap.style.position = 'relative';
+  ganttRowsWrap.style.minWidth = totalW + 'px';
+  ganttRowsWrap.appendChild(depSvg);
+
+  const barPos = {};
+
+  people.forEach((p, pi) => {
+    // Sidebar
+    const pr = document.createElement('div');
+    pr.className = 'person-row';
+    pr.style.height = ROW + 'px';
+    const ini = p.name.split(' ').map(x => x[0]).join('');
+    pr.innerHTML = `<div class="av" style="background:${p.bg};color:${p.tx}">${ini}</div><div><div class="p-name">${p.name}</div><div class="p-role">${p.role || ''}</div></div>`;
+    pList.appendChild(pr);
+
+    const cl = document.createElement('div');
+    cl.className = 'cap-lbl-row';
+    capLblCol.appendChild(cl);
+
+    // Gantt row
+    const gr = document.createElement('div');
+    gr.className = 'gantt-row';
+    gr.style.minWidth = totalW + 'px';
+    gr.style.height = ROW + 'px';
+    for (let w = 0; w < WEEKS; w++) {
+      const gc = document.createElement('div');
+      gc.className = 'gantt-cell' + (w % 2 ? ' shade' : '');
+      gc.style.width = WW + 'px';
+      gr.appendChild(gc);
+    }
+
+    const ptasks = tasks.filter(t => t.pid === p.id);
+    const slots = [];
+    ptasks.forEach((t, ti) => {
+      let row = 0;
+      while (slots[row] && slots[row] > t.s) row++;
+      slots[row] = t.s + t.d;
+      const top = 4 + row * 24;
+
+      const bar = document.createElement('div');
+      bar.className = 'task-bar' + (viol.has(t.id) ? ' dep-err' : '');
+      bar.style.cssText = `left:${t.s*WW+2}px;width:${t.d*WW-4}px;top:${top}px;background:${t.c};color:#fff;`;
+      bar.textContent = t.lbl;
+      bar.dataset.tid = t.id;
+
+      barPos[t.id] = { x: t.s * WW + 2 + (t.d * WW - 4) / 2, y: pi * ROW + top + 11 };
+
+      bar.addEventListener('mouseenter', e => {
+        const tt = document.getElementById('tt');
+        const depNames = t.deps.map(d => { const dt = tasks.find(x => x.id === d); return dt ? dt.lbl : '?'; }).join(', ') || '—';
+        tt.innerHTML = `<div class="tt-title">${t.lbl}</div>
+          <div class="tt-row"><span>Project</span><span>${t.proj}</span></div>
+          <div class="tt-row"><span>Start</span><span>${weekLabel(t.s).date}</span></div>
+          <div class="tt-row"><span>Einde</span><span>${weekLabel(t.s + t.d - 1).date}</span></div>
+          <div class="tt-row"><span>Duur</span><span>${t.d} wk</span></div>
+          <div class="tt-row"><span>Inspanning</span><span>${t.d * HRS_PER_TASK_WEEK}u</span></div>
+          <div class="tt-row"><span>Afh. van</span><span>${depNames}</span></div>
+          ${viol.has(t.id) ? '<div class="tt-warn">⚠ Afhankelijkheid geschonden</div>' : ''}
+          ${changedTaskIds.has(t.id) ? '<div class="tt-cascade" style="color:var(--amber)">● Gewijzigd — nog niet opgeslagen</div>' : ''}`;
+        tt.style.display = 'block';
+        moveTT(e);
+      });
+      bar.addEventListener('mousemove', moveTT);
+      bar.addEventListener('mouseleave', () => { document.getElementById('tt').style.display = 'none'; });
+
+      let dx0, os;
+      bar.addEventListener('mousedown', e => {
+        e.preventDefault();
+        dx0 = e.clientX; os = t.s;
+        bar.classList.add('dragging');
+        document.getElementById('tt').style.display = 'none';
+        let cascadeChildren = cascadeMode ? getCascadeChildren(t.id) : new Set();
+        let cascadeOrig = {};
+        cascadeChildren.forEach(cid => { const ct = tasks.find(x => x.id === cid); if (ct) cascadeOrig[cid] = ct.s; });
+
+        const onMove = ev => {
+          const delta = Math.round((ev.clientX - dx0) / WW);
+          if (!delta) return;
+          const newS = Math.max(0, Math.min(WEEKS - t.d, os + delta));
+          if (newS === t.s) return;
+          const diff = newS - t.s;
+          t.s = newS; markChanged(t.id);
+          if (cascadeMode) {
+            cascadeChildren.forEach(cid => {
+              const ct = tasks.find(x => x.id === cid);
+              if (ct) { ct.s = Math.max(0, Math.min(WEEKS - ct.d, cascadeOrig[cid] + (newS - os))); markChanged(cid); }
+            });
+          }
+          dx0 = ev.clientX; os = newS;
+          if (cascadeMode) cascadeChildren.forEach(cid => { const ct = tasks.find(x => x.id === cid); if (ct) cascadeOrig[cid] = ct.s; });
+          render();
+        };
+        const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+
+      gr.appendChild(bar);
+    });
+    ganttRowsWrap.appendChild(gr);
+
+    // Cap row
+    const cr = document.createElement('div');
+    cr.className = 'cap-row';
+    cr.style.minWidth = totalW + 'px';
+    cap[p.id].forEach((h, w) => {
+      const cc = document.createElement('div');
+      cc.className = 'cap-cell';
+      cc.style.width = WW + 'px';
+      const pct = Math.min(100, Math.round(h / MAX_HRS * 100));
+      const over = h > MAX_HRS, warn = !over && h >= MAX_HRS * 0.75;
+      const bc = over ? '#ff4d4d' : warn ? '#f5a623' : '#2ecc8a';
+      const tc = over ? '#ff8080' : warn ? '#f5c060' : '#5be3aa';
+      cc.innerHTML = h > 0 ? `<div class="cap-bar" style="width:${pct}%;background:${bc}"></div><span class="cap-num" style="color:${tc}">${h}u</span>` : '';
+      cr.appendChild(cc);
+    });
+    capRowsWrap.appendChild(cr);
+  });
+
+  // Draw dep lines
+  tasks.forEach(t => {
+    t.deps.forEach(did => {
+      const from = barPos[did], to = barPos[t.id];
+      if (!from || !to) return;
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      const mx = (from.x + to.x) / 2;
+      const isV = viol.has(t.id);
+      path.setAttribute('d', `M${from.x},${from.y} C${mx},${from.y} ${mx},${to.y} ${to.x},${to.y}`);
+      path.setAttribute('stroke', isV ? '#ff4d4d' : 'rgba(255,255,255,.12)');
+      path.setAttribute('stroke-width', isV ? '1.5' : '1');
+      path.setAttribute('stroke-dasharray', '4,3');
+      path.setAttribute('fill', 'none');
+      depSvg.appendChild(path);
+    });
+  });
+}
+
+function moveTT(e) { const tt = document.getElementById('tt'); tt.style.left = (e.clientX + 14) + 'px'; tt.style.top = (e.clientY - 8) + 'px'; }
+
+// ── INIT ─────────────────────────────────────────────────────────────────────
+const savedClient = localStorage.getItem('planner_client');
+const savedTenant = localStorage.getItem('planner_tenant');
+if (savedClient) document.getElementById('inp-client').value = savedClient;
+if (savedTenant) document.getElementById('inp-tenant').value = savedTenant;
+</script>
+</body>
+</html>
