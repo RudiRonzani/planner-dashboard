@@ -545,6 +545,7 @@ body {
 <script>
 // ── MSAL / AUTH ──────────────────────────────────────────────────────────────
 let msalApp = null, accessToken = null, isDemo = false;
+const DATAVERSE_URL = 'https://org64ba6b00.crm4.dynamics.com';
 let cascadeMode = false;
 let tasks = [], people = [], selectedPlanIds = [], allPlans = [];
 let origTasks = [];
@@ -971,7 +972,9 @@ async function loadTasksForPlans() {
       const planDetails = await graphGet(`planner/plans/${plan.id}`);
       const groupId = planDetails.container && planDetails.container.containerId ? planDetails.container.containerId : null;
       let membersData = { value: [] };
-      if (groupId) {
+      // Validate groupId is a proper GUID before calling groups API
+      const guidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (groupId && guidPattern.test(groupId)) {
         try { membersData = await graphGet(`groups/${groupId}/members?$select=id,displayName,jobTitle`); } catch(e) {}
       }
       const tasksData = await graphGet(`planner/plans/${plan.id}/tasks`);
