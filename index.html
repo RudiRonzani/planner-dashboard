@@ -1128,18 +1128,17 @@ async function saveToplanner() {
         const startDate = t.startDay !== undefined
           ? new Date(base4save.getTime() + t.startDay * 86400000)
           : new Date(base4save.getTime() + t.s * 7 * 86400000);
-        // PSS requires @@odata.type (double @), msdyn_project@odata.bind, and
-        // only send start + duration (not both start+finish to avoid recalculation issues)
+        // PSS Update: Entity is a JSON string with task ID + fields to update
+        // Do NOT include @odata.type or navigation properties in update payload
+        // Only send start + duration (sending finish too causes recalculation issues)
         const durationMinutes = Math.max(480, (t.workdays || t.d * 5) * 480);
-        const entityObj = {
-          '@@odata.type': 'Microsoft.Dynamics.CRM.msdyn_projecttask',
-          'msdyn_project@odata.bind': `/msdyn_projects(${t.planId})`,
+        const entityStr = JSON.stringify({
           msdyn_projecttaskid: t.dvTaskId,
           msdyn_start: startDate.toISOString(),
           msdyn_duration: durationMinutes
-        };
+        });
         await dvAction('msdyn_PssUpdateV1', {
-          Entity: JSON.stringify(entityObj),
+          Entity: entityStr,
           OperationSetId: opSetId
         });
       }
