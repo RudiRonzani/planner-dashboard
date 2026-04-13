@@ -551,7 +551,7 @@ let tasks = [], people = [], selectedPlanIds = [], allPlans = [];
 let origTasks = [];
 let changedTaskIds = new Set();
 
-const WEEKS = 14;
+const WEEKS = 26;
 let dayViewOn = false;
 
 function toggleDayView() {
@@ -898,27 +898,50 @@ async function loadTasksForPlans() {
             let displayName = res.name || '';
             let role = '';
             if (userId) {
+              // Try direct systemuser lookup by ID
               try {
-                const u = await graphGet(`users/${userId}?$select=displayName,jobTitle`);
-                if (u.displayName) displayName = u.displayName;
-                role = u.jobTitle || '';
-              } catch {}
+                const su = await dvGet(`systemusers(${userId})?$select=fullname,jobtitle,azureactivedirectoryobjectid`);
+                if (su.fullname) displayName = su.fullname;
+                role = su.jobtitle || '';
+                // Also try Graph with AAD ID for better name
+                if (su.azureactivedirectoryobjectid) {
+                  try {
+                    const u = await graphGet(`users/${su.azureactivedirectoryobjectid}?$select=displayName,jobTitle`);
+                    if (u.displayName) displayName = u.displayName;
+                    role = u.jobTitle || role;
+                  } catch {}
+                }
+              } catch {
+                // Fallback: filter query
+                try {
+                  const suData = await dvGet(`systemusers?$select=fullname,jobtitle&$filter=systemuserid eq '${userId}'`);
+                  if (suData.value && suData.value.length > 0) {
+                    displayName = suData.value[0].fullname || displayName;
+                    role = suData.value[0].jobtitle || '';
+                  }
+                } catch {}
+              }
             }
             peopleMap[resId] = { id: resId, name: displayName || res.name || resId.substring(0,8), role, aadId: userId };
           } catch { peopleMap[resId] = { id: resId, name: resId.substring(0,8), role: '' }; }
         }
       }
 
-      const depData = await dvGet(
-        `msdyn_taskdependencies?$select=_msdyn_predecessortask_value,_msdyn_successortask_value` +
-        `&$filter=_msdyn_project_value eq '${plan.id}'`
-      ).catch(() => ({ value: [] }));
+      // Try multiple possible table names for task dependencies
       const depMap = {};
-      (depData.value || []).forEach(d => {
-        const succ = d._msdyn_successortask_value;
-        const pred = d._msdyn_predecessortask_value;
-        if (succ && pred) { if (!depMap[succ]) depMap[succ] = []; depMap[succ].push(pred); }
-      });
+      const depTableNames = ['msdyn_projecttaskdependencies','msdyn_taskdependencies','msdyn_projecttaskdependencys'];
+      for (const tbl of depTableNames) {
+        try {
+          const depData = await dvGet(`${tbl}?$select=_msdyn_predecessortask_value,_msdyn_successortask_value&$filter=_msdyn_project_value eq '${plan.id}'`);
+          (depData.value || []).forEach(d => {
+            const succ = d._msdyn_successortask_value;
+            const pred = d._msdyn_predecessortask_value;
+            if (succ && pred) { if (!depMap[succ]) depMap[succ] = []; depMap[succ].push(pred); }
+          });
+          console.log('Dependencies loaded via:', tbl, Object.keys(depMap).length, 'found');
+          break; // stop at first working table
+        } catch(e) { console.log('Dep table', tbl, 'not available'); }
+      }
 
       (tData.value || []).forEach(t => {
         const taskId = t.msdyn_projecttaskid;
@@ -951,7 +974,7 @@ async function loadTasksForPlans() {
           : workdays * 6 / Math.max(1, assignees.length); // fallback: 6h/workday
         const effortPerWeek = effortHours / Math.max(1, durWeeks);
 
-        console.log('Task:', t.msdyn_subject, { startDay, endDay, workdays, durWeeks, effortHours: Math.round(effortHours*10)/10, effortReal, rawEffort: t.msdyn_effort });
+        // console.log('Task:', t.msdyn_subject, { startDay, endDay, workdays, durWeeks, effortHours: Math.round(effortHours*10)/10, effortReal });
 
         assignees.forEach(resId => {
           allTasksArr.push({
@@ -1022,6 +1045,27 @@ async function loadTasksForPlans() {
     }));
 
     tasks = allTasksArr.filter(t => t.pid !== 'unassigned' && people.find(p => p.id === t.pid));
+
+    // Recalculate START based on earliest task, aligned to Monday
+    if (tasks.length > 0) {
+      const minDay = Math.min(...tasks.map(t => t.startDay || 0));
+      // Shift START to 1 week before earliest task
+      const shiftDays = minDay - 7;
+      if (shiftDays !== 0) {
+        START.setDate(START.getDate() + shiftDays);
+        // Round back to nearest Monday
+        const dow = START.getDay();
+        const daysToMon = dow === 0 ? 1 : dow === 1 ? 0 : -(dow - 1);
+        START.setDate(START.getDate() + daysToMon);
+        // Recalculate all startDay/endDay relative to new START
+        tasks.forEach(t => {
+          t.s = Math.max(0, Math.floor((t.startDay - shiftDays) / 7));
+          const endWeek = Math.max(t.s + 1, Math.ceil(((t.endDay || t.startDay) - shiftDays) / 7));
+          t.d = Math.max(1, endWeek - t.s);
+        });
+      }
+    }
+
     origTasks = tasks.map(t => ({ ...t }));
     changedTaskIds = new Set();
     hideBanners();
@@ -1137,8 +1181,14 @@ async function applyConfig() {
 
 // ── LOGIC ────────────────────────────────────────────────────────────────────
 function calcCap() {
-  const c = {}; people.forEach(p => { c[p.id] = Array(WEEKS).fill(0); });
-  tasks.forEach(t => { for (let w = t.s; w < t.s + t.d && w < WEEKS; w++) c[t.pid][w] += HRS_PER_TASK_WEEK; });
+  const totalWeeks = Math.max(WEEKS + viewOffset + 20, tasks.reduce((m,t) => Math.max(m, t.s + t.d + 1), 0), WEEKS + 20);
+  const c = {}; people.forEach(p => { c[p.id] = Array(totalWeeks).fill(0); });
+  tasks.forEach(t => {
+    const hpw = t.effortPerWeek || (t.effortHours ? t.effortHours / Math.max(1, t.d) : HRS_PER_TASK_WEEK);
+    for (let w = t.s; w < t.s + t.d && w < totalWeeks; w++) {
+      c[t.pid][w] = Math.round((c[t.pid][w] + hpw) * 10) / 10;
+    }
+  });
   return c;
 }
 
@@ -1383,6 +1433,9 @@ function render() {
       const row = taskRowMap[t.id];
       const top = 4 + row * 24;
 
+      // Skip bars outside visible range
+      if (t.s + t.d <= viewOffset || t.s >= viewOffset + WEEKS) return;
+
       const bar = document.createElement('div');
       bar.className = 'task-bar' + (viol.has(t.id) ? ' dep-err' : '');
       let barLeft, barWidth;
@@ -1437,16 +1490,23 @@ function render() {
         cascadeChildren.forEach(cid => { const ct = tasks.find(x => x.id === cid); if (ct) cascadeOrig[cid] = ct.s; });
 
         const onMove = ev => {
-          const delta = Math.round((ev.clientX - dx0) / WW);
+          const unitW = dayViewOn && allDaysForGantt ? Math.max(18, Math.floor((WEEKS * WW) / allDaysForGantt.length)) : WW;
+          const rawDelta = (ev.clientX - dx0) / unitW;
+          const delta = dayViewOn ? Math.round(rawDelta / 5) : Math.round(rawDelta);
           if (!delta) return;
-          const newS = Math.max(0, Math.min(WEEKS - t.d, os + delta));
+          const maxWeek = WEEKS + viewOffset + 52;
+          const newS = Math.max(0, Math.min(maxWeek - t.d, os + delta));
           if (newS === t.s) return;
-          const diff = newS - t.s;
           t.s = newS; markChanged(t.id);
+          if (t.startDay !== undefined) { t.startDay += delta * 7; t.endDay += delta * 7; }
           if (cascadeMode) {
             cascadeChildren.forEach(cid => {
               const ct = tasks.find(x => x.id === cid);
-              if (ct) { ct.s = Math.max(0, Math.min(WEEKS - ct.d, cascadeOrig[cid] + (newS - os))); markChanged(cid); }
+              if (ct) {
+                ct.s = Math.max(0, Math.min(maxWeek - ct.d, cascadeOrig[cid] + (newS - os)));
+                if (ct.startDay !== undefined) { ct.startDay += delta * 7; ct.endDay += delta * 7; }
+                markChanged(cid);
+              }
             });
           }
           dx0 = ev.clientX; os = newS;
