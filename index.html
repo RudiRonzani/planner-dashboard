@@ -1101,24 +1101,86 @@ async function saveToplanner() {
   const status = document.getElementById('save-status');
   prog.classList.add('show');
 
+  const base4save = typeof DYNAMIC_START !== 'undefined' ? DYNAMIC_START : START;
   let done = 0, failed = 0;
-  for (const t of changed) {
+
+  // Group by project for OperationSet (Dataverse Premium) vs Graph API (basic)
+  const dvTasks = changed.filter(t => t.source === 'dataverse' && t.dvTaskId);
+  const graphTasks = changed.filter(t => t.source !== 'dataverse');
+
+  // ── Save Dataverse (Premium) tasks via PSS Schedule API ──────────────────
+  // Group by planId to create one OperationSet per project
+  const byPlan = {};
+  dvTasks.forEach(t => { if (!byPlan[t.planId]) byPlan[t.planId] = []; byPlan[t.planId].push(t); });
+
+  for (const [planId, planTasks] of Object.entries(byPlan)) {
+    try {
+      // Step 1: Create OperationSet
+      const opSetResp = await dvAction('msdyn_CreateOperationSetV1', {
+        ProjectId: planId,
+        Description: 'Portfolio dashboard update ' + new Date().toISOString()
+      });
+      const opSetId = opSetResp.OperationSetId;
+      if (!opSetId) throw new Error('Geen OperationSetId ontvangen');
+
+      // Step 2: Queue update for each task
+      for (const t of planTasks) {
+        const startDate = t.startDay !== undefined
+          ? new Date(base4save.getTime() + t.startDay * 86400000)
+          : new Date(base4save.getTime() + t.s * 7 * 86400000);
+        const endDate = t.endDay !== undefined
+          ? new Date(base4save.getTime() + t.endDay * 86400000)
+          : new Date(base4save.getTime() + (t.s + t.d) * 7 * 86400000);
+
+        await dvAction('msdyn_PssUpdateV1', {
+          Entity: JSON.stringify({
+            '@odata.type': 'Microsoft.Dynamics.CRM.msdyn_projecttask',
+            msdyn_projecttaskid: t.dvTaskId,
+            msdyn_start: startDate.toISOString(),
+            msdyn_finish: endDate.toISOString(),
+            msdyn_duration: Math.max(1, (t.workdays || t.d * 5)) * 480
+          }),
+          OperationSetId: opSetId
+        });
+      }
+
+      // Step 3: Execute OperationSet
+      await dvAction('msdyn_ExecuteOperationSetV1', { OperationSetId: opSetId });
+
+      // Step 4: Wait for async persistence (PSS is async)
+      await new Promise(r => setTimeout(r, 2000));
+
+      // Step 5: Check status
+      const opResult = await dvGet(`msdyn_operationsets(${opSetId})?$select=msdyn_status`);
+      const statusCode = opResult.msdyn_status;
+      // 192350003 = Completed, 192350004 = Failed
+      if (statusCode === 192350004) throw new Error('OperationSet mislukt');
+
+      done += planTasks.length;
+      status.textContent = `${done + failed} / ${changed.length} taken`;
+      bar.style.width = Math.round((done + failed) / changed.length * 100) + '%';
+    } catch(e) {
+      console.error('Dataverse save error for plan', planId, e.message);
+      failed += byPlan[planId].length;
+    }
+  }
+
+  // ── Save basic Graph API tasks ────────────────────────────────────────────
+  for (const t of graphTasks) {
     status.textContent = `${done + failed} / ${changed.length} taken`;
     bar.style.width = Math.round((done + failed) / changed.length * 100) + '%';
     try {
-      // Step 1: get fresh ETag
       const fresh = await graphGet(`planner/tasks/${t.id}`);
       const etag = fresh['@odata.etag'];
-      // Step 2: calculate dates
-      const startDate = new Date(START); startDate.setDate(startDate.getDate() + t.s * 7);
-      const dueDate = new Date(START); dueDate.setDate(dueDate.getDate() + (t.s + t.d) * 7);
+      const startDate = new Date(base4save); startDate.setDate(startDate.getDate() + t.s * 7);
+      const dueDate = new Date(base4save); dueDate.setDate(dueDate.getDate() + (t.s + t.d) * 7);
       await graphPatch(`planner/tasks/${t.id}`, {
         startDateTime: startDate.toISOString(),
         dueDateTime: dueDate.toISOString()
       }, etag);
       done++;
     } catch(e) { failed++; console.error(t.lbl, e); }
-    await new Promise(r => setTimeout(r, 300)); // rate limit
+    await new Promise(r => setTimeout(r, 300));
   }
 
   bar.style.width = '100%';
@@ -1126,8 +1188,31 @@ async function saveToplanner() {
   setTimeout(() => prog.classList.remove('show'), 3000);
 
   changedTaskIds = new Set();
-  if (failed) showBanner('err', `${done} taken opgeslagen, ${failed} mislukt. Controleer de console.`);
+  updateSaveBtn();
+  if (failed) showBanner('err', `${done} taken opgeslagen, ${failed} mislukt.`);
   else showBanner('ok', `${done} taken succesvol bijgewerkt in Planner.`);
+}
+
+// Call a Dataverse unbound action
+async function dvAction(actionName, params) {
+  const token = await getDvToken();
+  if (!token) throw new Error('Geen Dataverse token');
+  const r = await fetch(DATAVERSE_URL + '/api/data/v9.2/' + actionName, {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + token,
+      'Content-Type': 'application/json',
+      'OData-MaxVersion': '4.0',
+      'OData-Version': '4.0'
+    },
+    body: JSON.stringify(params)
+  });
+  if (!r.ok) {
+    const err = await r.text();
+    throw new Error(actionName + ' mislukt: ' + err.substring(0, 300));
+  }
+  if (r.status === 204) return {};
+  return r.json();
 }
 
 // ── CONFIG MODAL ─────────────────────────────────────────────────────────────
