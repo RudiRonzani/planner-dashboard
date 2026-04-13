@@ -556,7 +556,7 @@ async function connectMSAL() {
   script.onload = async () => {
     try {
       msalApp = new msal.PublicClientApplication({
-        auth: { clientId, authority: `https://login.microsoftonline.com/${tenantId}`, redirectUri: 'https://delightful-cliff-0390d0c03.7.azurestaticapps.net' }
+        auth: { clientId, authority: `https://login.microsoftonline.com/${tenantId}`, redirectUri: window.location.origin }
       });
       await msalApp.initialize();
       const resp = await msalApp.loginPopup({ scopes: ['Tasks.ReadWrite','Group.Read.All','User.Read'] });
@@ -690,10 +690,13 @@ async function loadTasksForPlans() {
     const peopleMap = {};
     for (const planId of selectedPlanIds) {
       const plan = allPlans.find(p => p.id === planId);
-      const [tasksData, membersData] = await Promise.all([
-        graphGet(`planner/plans/${planId}/tasks`),
-        graphGet(`planner/plans/${planId}/members`)
-      ]);
+      const planDetails = await graphGet(`planner/plans/${planId}`);
+      const groupId = planDetails.container && planDetails.container.containerId ? planDetails.container.containerId : null;
+      let membersData = { value: [] };
+      if (groupId) {
+        try { membersData = await graphGet(`groups/${groupId}/members?$select=id,displayName,jobTitle`); } catch(e) {}
+      }
+      const tasksData = await graphGet(`planner/plans/${planId}/tasks`);
       (tasksData.value || []).forEach(t => {
         const assignees = Object.keys(t.assignments || {});
         assignees.forEach(uid => { if (!peopleMap[uid]) peopleMap[uid] = { id: uid }; });
