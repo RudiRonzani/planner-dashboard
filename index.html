@@ -581,14 +581,22 @@ function calcDayCap() {
   const cap = {};
   people.forEach(p => { cap[p.id] = {}; allDays.forEach(d => { cap[p.id][d.date.toDateString()] = 0; }); });
   tasks.forEach(t => {
-    const taskDays = getWorkDays(t.s, t.d);
-    if (!taskDays.length) return;
-    const hrsPerDay = MAX_HRS / taskDays.length * (HRS_PER_TASK_WEEK * t.d / MAX_HRS);
-    // simpler: distribute evenly, cap at reasonable amount
-    const effortPerDay = (HRS_PER_TASK_WEEK * t.d) / taskDays.length;
+    if (!t.pid || !cap[t.pid]) return;
+    let taskDays;
+    if (t.startDay !== undefined && t.startDay !== null) {
+      taskDays = allDays.filter(d => {
+        const off = Math.round((d.date - START) / (24*3600*1000));
+        return off >= t.startDay && off <= (t.endDay !== undefined ? t.endDay : t.startDay);
+      });
+    } else {
+      taskDays = getWorkDays(t.s, t.d);
+    }
+    if (!taskDays.length) taskDays = getWorkDays(t.s, Math.max(1, t.d));
+    const totalEffort = t.effortHours || (HRS_PER_TASK_WEEK * Math.max(1, t.workdays ? Math.ceil(t.workdays/5) : t.d));
+    const effortPerDay = totalEffort / Math.max(1, taskDays.length);
     taskDays.forEach(d => {
-      if (cap[t.pid] && cap[t.pid][d.date.toDateString()] !== undefined) {
-        cap[t.pid][d.date.toDateString()] += effortPerDay;
+      if (cap[t.pid][d.date.toDateString()] !== undefined) {
+        cap[t.pid][d.date.toDateString()] = Math.round((cap[t.pid][d.date.toDateString()] + effortPerDay) * 10) / 10;
       }
     });
   });
@@ -840,13 +848,19 @@ async function loadTasksForPlans() {
       for (const resId of resIds) {
         if (!peopleMap[resId]) {
           try {
-            const res = await dvGet(`bookableresources(${resId})?$select=name,_userid_value`);
+            const res = await dvGet(`bookableresources(${resId})?$select=name,msdyn_primaryemail,_userid_value`);
             const userId = res._userid_value;
+            // Try to get display name from AAD user if available
+            let displayName = res.name || '';
             let role = '';
             if (userId) {
-              try { const u = await graphGet(`users/${userId}?$select=jobTitle`); role = u.jobTitle || ''; } catch {}
+              try {
+                const u = await graphGet(`users/${userId}?$select=displayName,jobTitle`);
+                if (u.displayName) displayName = u.displayName;
+                role = u.jobTitle || '';
+              } catch {}
             }
-            peopleMap[resId] = { id: resId, name: res.name || resId.substring(0,8), role, aadId: userId };
+            peopleMap[resId] = { id: resId, name: displayName || res.name || resId.substring(0,8), role, aadId: userId };
           } catch { peopleMap[resId] = { id: resId, name: resId.substring(0,8), role: '' }; }
         }
       }
@@ -1115,13 +1129,13 @@ function autoOptimize() {
     let best = e;
     for (let s = e; s <= WEEKS; s++) {
       let ok = true;
-      const hpw = t.effortHours ? t.effortHours / Math.max(1, t.d) : HRS_PER_TASK_WEEK;
+      const hpw = t.effortPerWeek || (t.effortHours ? t.effortHours / Math.max(1, t.d) : HRS_PER_TASK_WEEK);
       for (let w = s; w < s + t.d; w++) { if ((used[t.pid][w] || 0) + hpw > MAX_HRS) { ok = false; break; } }
       if (ok) { best = s; break; }
     }
     ns[t.id] = best;
-    const hpw = t.effortHours ? t.effortHours / Math.max(1, t.d) : HRS_PER_TASK_WEEK;
-    for (let w = best; w < best + t.d; w++) used[t.pid][w] = (used[t.pid][w] || 0) + hpw;
+    const hpwF = t.effortPerWeek || (t.effortHours ? t.effortHours / Math.max(1, t.d) : HRS_PER_TASK_WEEK);
+    for (let w = best; w < best + t.d; w++) used[t.pid][w] = (used[t.pid][w] || 0) + hpwF;
   });
   tasks.forEach(t => { if (ns[t.id] !== undefined) { const newS = Math.min(ns[t.id], WEEKS - t.d); if (newS !== t.s) { t.s = newS; markChanged(t.id); } } });
   showBanner('ok', 'Plan geoptimaliseerd — afhankelijkheden gerespecteerd, overbelasting geminimaliseerd.');
@@ -1238,14 +1252,14 @@ function render() {
 
   const depSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   depSvg.setAttribute('class', 'dep-svg');
-  const svgW = dayViewOn ? (allDaysCheck ? allDaysCheck.length * DWCheck : totalW) : totalW;
-  depSvg.style.width = svgW + 'px';
+  depSvg.style.width = effectiveTotalW + 'px';
   depSvg.style.height = '100%';
   depSvg.style.position = 'absolute';
   ganttRowsWrap.style.position = 'relative';
   const allDaysCheck = dayViewOn ? getWorkDays(0, WEEKS) : null;
   const DWCheck = dayViewOn ? Math.max(18, Math.floor((WEEKS * WW) / allDaysCheck.length)) : WW;
-  ganttRowsWrap.style.minWidth = (dayViewOn ? allDaysCheck.length * DWCheck : totalW) + 'px';
+  const effectiveTotalW = dayViewOn ? allDaysCheck.length * DWCheck : totalW;
+  ganttRowsWrap.style.minWidth = effectiveTotalW + 'px';
   ganttRowsWrap.appendChild(depSvg);
 
   const barPos = {};
@@ -1266,12 +1280,12 @@ function render() {
     // Gantt row
     const gr = document.createElement('div');
     gr.className = 'gantt-row';
-    const allDaysForGantt = dayViewOn ? getWorkDays(0, WEEKS) : null;
-    const DW = dayViewOn ? Math.max(18, Math.floor((WEEKS * WW) / allDaysForGantt.length)) : WW;
-    const totalDayW = dayViewOn ? allDaysForGantt.length * DW : totalW;
+    const allDaysForGantt = allDaysCheck;
+    const DW = dayViewOn ? DWCheck : WW;
+    const totalDayW = dayViewOn ? (allDaysCheck ? allDaysCheck.length * DWCheck : totalW) : totalW;
     gr.style.minWidth = (dayViewOn ? totalDayW : totalW) + 'px';
     gr.style.height = ROW + 'px';
-    if (dayViewOn) {
+    if (dayViewOn && allDaysForGantt) {
       allDaysForGantt.forEach((d, di) => {
         const gc = document.createElement('div');
         gc.className = 'gantt-cell' + (d.dow === 1 ? '' : ' shade');
@@ -1293,8 +1307,11 @@ function render() {
     const taskRowMap = {};
     ptasks.forEach(t => {
       let row = 0;
-      while (slots[row] && slots[row] > t.s) row++;
-      slots[row] = t.s + t.d;
+      // Use day offsets for slot calculation when in day view for accuracy
+      const slotStart = dayViewOn && t.startDay !== undefined ? t.startDay : t.s * 7;
+      const slotEnd = dayViewOn && t.endDay !== undefined ? t.endDay : (t.s + t.d) * 7;
+      while (slots[row] && slots[row] > slotStart) row++;
+      slots[row] = slotEnd;
       taskRowMap[t.id] = row;
     });
     const numSlotRows = Math.max(1, slots.length);
@@ -1311,17 +1328,13 @@ function render() {
       bar.className = 'task-bar' + (viol.has(t.id) ? ' dep-err' : '');
       let barLeft, barWidth;
       if (dayViewOn && allDaysForGantt && t.startDay !== undefined) {
-        // Find pixel position based on actual day offset
-        const barStartIdx = allDaysForGantt.findIndex(d => {
+        // Map day offset to workday column index
+        let si = 0, ei = 1;
+        allDaysForGantt.forEach((d, idx) => {
           const offset = Math.round((d.date - START) / (24*3600*1000));
-          return offset >= t.startDay;
+          if (offset <= t.startDay) si = idx;
+          if (offset <= (t.endDay || t.startDay)) ei = idx + 1;
         });
-        const barEndIdx = allDaysForGantt.findIndex(d => {
-          const offset = Math.round((d.date - START) / (24*3600*1000));
-          return offset > (t.endDay || t.startDay);
-        });
-        const si = barStartIdx >= 0 ? barStartIdx : 0;
-        const ei = barEndIdx >= 0 ? barEndIdx : allDaysForGantt.length;
         barLeft = si * DW + 2;
         barWidth = Math.max(DW - 4, (ei - si) * DW - 4);
       } else {
@@ -1339,10 +1352,12 @@ function render() {
         const depNames = t.deps.map(d => { const dt = tasks.find(x => x.id === d); return dt ? dt.lbl : '?'; }).join(', ') || '—';
         tt.innerHTML = `<div class="tt-title">${t.lbl}</div>
           <div class="tt-row"><span>Project</span><span>${t.proj}</span></div>
-          <div class="tt-row"><span>Start</span><span>${weekLabel(t.s).date}</span></div>
-          <div class="tt-row"><span>Einde</span><span>${weekLabel(t.s + t.d - 1).date}</span></div>
-          <div class="tt-row"><span>Duur</span><span>${t.d} wk</span></div>
-          <div class="tt-row"><span>Inspanning</span><span>${t.d * HRS_PER_TASK_WEEK}u</span></div>
+          <div class="tt-row"><span>Start</span><span>${t.startDay !== undefined ? new Date(START.getTime() + t.startDay*86400000).toLocaleDateString('nl-BE') : weekLabel(t.s).date}</span></div>
+          <div class="tt-row"><span>Einde</span><span>${t.endDay !== undefined ? new Date(START.getTime() + t.endDay*86400000).toLocaleDateString('nl-BE') : weekLabel(t.s+t.d-1).date}</span></div>
+          <div class="tt-row"><span>Werkdagen</span><span>${t.workdays || t.d * 5}</span></div>
+          <div class="tt-row"><span>Duur</span><span>${t.workdays ? t.workdays + ' dag' + (t.workdays !== 1 ? 'en' : '') : t.d + ' wk'}</span></div>
+          <div class="tt-row"><span>Inspanning</span><span>${Math.round(t.effortHours || 0)}u${t.effortReal ? '' : ' (~schatting)'}</span></div>
+          <div class="tt-row"><span>Voortgang</span><span>${t.progress || 0}%</span></div>
           <div class="tt-row"><span>Afh. van</span><span>${depNames}</span></div>
           ${viol.has(t.id) ? '<div class="tt-warn">⚠ Afhankelijkheid geschonden</div>' : ''}
           ${changedTaskIds.has(t.id) ? '<div class="tt-cascade" style="color:var(--amber)">● Gewijzigd — nog niet opgeslagen</div>' : ''}`;
@@ -1391,7 +1406,7 @@ function render() {
     // Cap row
     const cr = document.createElement('div');
     cr.className = 'cap-row';
-    cr.style.minWidth = (dayViewOn && allDaysCheck ? allDaysCheck.length * DWCheck : totalW) + 'px';
+    cr.style.minWidth = effectiveTotalW + 'px';
     cap[p.id].forEach((h, w) => {
       const cc = document.createElement('div');
       cc.className = 'cap-cell';
