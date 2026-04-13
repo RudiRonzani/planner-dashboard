@@ -456,6 +456,12 @@ body {
     <div class="toolbar-sep"></div>
     <button class="btn btn-sm btn-accent" onclick="autoOptimize()">✦ Auto-optimaliseer</button>
     <button class="btn btn-sm" onclick="resetAll()">↺ Reset</button>
+    <div class="toolbar-sep"></div>
+    <button class="btn btn-sm btn-icon" onclick="shiftView(-4)" title="4 weken terug">◀◀</button>
+    <button class="btn btn-sm btn-icon" onclick="shiftView(-1)" title="1 week terug">◀</button>
+    <button class="btn btn-sm" onclick="goToToday()">Vandaag</button>
+    <button class="btn btn-sm btn-icon" onclick="shiftView(1)" title="1 week vooruit">▶</button>
+    <button class="btn btn-sm btn-icon" onclick="shiftView(4)" title="4 weken vooruit">▶▶</button>
     <div class="toolbar-right">
       <div class="stat-row" id="stats-row"></div>
       <div class="toolbar-sep"></div>
@@ -548,6 +554,7 @@ let msalApp = null, accessToken = null, isDemo = false;
 const DATAVERSE_URL = 'https://org64ba6b00.crm4.dynamics.com';
 let cascadeMode = false;
 let tasks = [], people = [], selectedPlanIds = [], allPlans = [];
+let viewOffset = 0;
 let origTasks = [];
 let changedTaskIds = new Set();
 
@@ -1181,7 +1188,8 @@ async function applyConfig() {
 
 // ── LOGIC ────────────────────────────────────────────────────────────────────
 function calcCap() {
-  const totalWeeks = Math.max(WEEKS + viewOffset + 20, tasks.reduce((m,t) => Math.max(m, t.s + t.d + 1), 0), WEEKS + 20);
+  const vo0 = typeof viewOffset !== 'undefined' ? viewOffset : 0;
+  const totalWeeks = Math.max(WEEKS + Math.abs(vo0) + 20, tasks.reduce((m,t) => Math.max(m, t.s + t.d + 1), 0), WEEKS + 20);
   const c = {}; people.forEach(p => { c[p.id] = Array(totalWeeks).fill(0); });
   tasks.forEach(t => {
     const hpw = t.effortPerWeek || (t.effortHours ? t.effortHours / Math.max(1, t.d) : HRS_PER_TASK_WEEK);
@@ -1214,6 +1222,18 @@ function updateSaveBtn() {
     btn.textContent = changedTaskIds.size > 0 ? `↑ Opslaan in Planner (${changedTaskIds.size})` : '↑ Opslaan in Planner';
     btn.style.opacity = changedTaskIds.size > 0 ? '1' : '.6';
   }
+}
+
+function shiftView(delta) {
+  viewOffset = Math.max(0, viewOffset + delta);
+  render();
+}
+
+function goToToday() {
+  const base = typeof DYNAMIC_START !== 'undefined' ? DYNAMIC_START : START;
+  const todayWeek = Math.round((new Date() - base) / (7*24*3600*1000));
+  viewOffset = Math.max(0, todayWeek - 2);
+  render();
 }
 
 function toggleCascade() {
@@ -1340,11 +1360,15 @@ function render() {
     });
   } else {
     wr.style.minWidth = totalW + 'px';
+    const base4hdr = typeof DYNAMIC_START !== 'undefined' ? DYNAMIC_START : START;
+    const todayWeek4hdr = Math.round((new Date() - base4hdr) / (7*24*3600*1000));
     for (let w = 0; w < WEEKS; w++) {
-      const lbl = weekLabel(w);
+      const absW = w + (typeof viewOffset !== 'undefined' ? viewOffset : 0);
+      const lbl = weekLabel(absW);
       const wc = document.createElement('div');
       wc.className = 'week-cell';
       wc.style.width = WW + 'px';
+      if (absW === todayWeek4hdr) wc.style.background = 'rgba(91,127,255,.1)';
       wc.innerHTML = `<span class="wdate">${lbl.date}</span><span>${lbl.week}</span>`;
       wr.appendChild(wc);
     }
@@ -1405,7 +1429,7 @@ function render() {
     } else {
       for (let w = 0; w < WEEKS; w++) {
         const gc = document.createElement('div');
-        gc.className = 'gantt-cell' + (w % 2 ? ' shade' : '');
+        gc.className = 'gantt-cell' + ((w + viewOffset) % 2 ? ' shade' : '');
         gc.style.width = WW + 'px';
         gr.appendChild(gc);
       }
@@ -1450,7 +1474,7 @@ function render() {
         barLeft = si * DW + 2;
         barWidth = Math.max(DW - 4, (ei - si) * DW - 4);
       } else {
-        barLeft = t.s * WW + 2;
+        barLeft = (t.s - viewOffset) * WW + 2;
         barWidth = t.d * WW - 4;
       }
       bar.style.cssText = `left:${barLeft}px;width:${barWidth}px;top:${top}px;background:${t.c};color:#fff;`;
@@ -1526,7 +1550,13 @@ function render() {
     const cr = document.createElement('div');
     cr.className = 'cap-row';
     cr.style.minWidth = effectiveTotalW + 'px';
-    cap[p.id].forEach((h, w) => {
+    // Only show capacity for visible weeks
+    const vo = typeof viewOffset !== 'undefined' ? viewOffset : 0;
+    const capSlice = cap[p.id].slice(Math.max(0, vo), Math.max(0, vo) + WEEKS);
+    // Pad with zeros if offset is negative
+    const padding = Math.max(0, -vo);
+    const paddedCap = [...Array(Math.min(padding, WEEKS)).fill(0), ...capSlice].slice(0, WEEKS);
+    paddedCap.forEach((h, w) => {
       const cc = document.createElement('div');
       cc.className = 'cap-cell';
       cc.style.width = WW + 'px';
