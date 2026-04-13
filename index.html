@@ -871,7 +871,7 @@ async function loadTasksForPlans() {
     // ── DATAVERSE PLANS ──────────────────────────────────────────────────
     for (const plan of dvPlans) {
       const tData = await dvGet(
-        `msdyn_projecttasks?$select=msdyn_projecttaskid,msdyn_subject,msdyn_scheduledstart,msdyn_scheduledend,msdyn_effort,msdyn_scheduleddurationminutes,msdyn_progress` +
+        `msdyn_projecttasks?$select=msdyn_projecttaskid,msdyn_subject,msdyn_start,msdyn_finish,msdyn_effort,msdyn_duration,msdyn_progress,msdyn_summary` +
         `&$filter=_msdyn_project_value eq '${plan.id}' and statecode eq 0`
       );
 
@@ -924,24 +924,34 @@ async function loadTasksForPlans() {
         const taskId = t.msdyn_projecttaskid;
         const assignees = assignMap[taskId] || [];
         if (!assignees.length) return;
+        if (t.msdyn_summary) return; // skip parent/rollup tasks
 
         // Day-based offsets
-        const startDay = dateToDayOffset(t.msdyn_scheduledstart);
-        const endDay = dateToDayOffset(t.msdyn_scheduledend);
+        const startDay = dateToDayOffset(t.msdyn_start);
+        const endDay = dateToDayOffset(t.msdyn_finish);
         if (startDay === null) return;
 
-        // Convert to week-slot for gantt (s = week index, d = number of weeks)
+        // Duration: msdyn_duration = hours, 8h = 1 workday
+        let durWorkdays;
+        if (t.msdyn_duration && t.msdyn_duration > 0) {
+          durWorkdays = Math.max(1, Math.round(t.msdyn_duration / 8));
+        } else if (endDay !== null && endDay >= startDay) {
+          durWorkdays = Math.max(1, workdaysBetween(startDay, endDay));
+        } else {
+          durWorkdays = 1;
+        }
+        const workdays = durWorkdays;
         const startWeek = Math.max(0, Math.floor(startDay / 7));
-        const endWeek = endDay !== null ? Math.max(startWeek, Math.ceil(endDay / 7)) : startWeek + 1;
-        const durWeeks = Math.max(1, endWeek - startWeek);
+        const durWeeks = Math.max(1, Math.ceil(durWorkdays / 5));
 
-        // Actual workdays for capacity calculation
-        const workdays = endDay !== null ? workdaysBetween(startDay, endDay) : durWeeks * 5;
-
-        // Effort in hours (msdyn_effort is in hours)
-        const effortHours = (t.msdyn_effort && t.msdyn_effort > 0)
+        // Effort in hours (msdyn_effort is in hours, split over assignees)
+        const effortReal = !!(t.msdyn_effort && t.msdyn_effort > 0);
+        const effortHours = effortReal
           ? t.msdyn_effort / Math.max(1, assignees.length)
-          : workdays * MAX_HRS; // fallback: full day per workday
+          : workdays * 6 / Math.max(1, assignees.length); // fallback: 6h/workday
+        const effortPerWeek = effortHours / Math.max(1, durWeeks);
+
+        console.log('Task:', t.msdyn_subject, { startDay, endDay, workdays, durWeeks, effortHours: Math.round(effortHours*10)/10, effortReal, rawEffort: t.msdyn_effort });
 
         assignees.forEach(resId => {
           allTasksArr.push({
@@ -956,7 +966,8 @@ async function loadTasksForPlans() {
             endDay: endDay || startDay,
             workdays,
             effortHours,
-            effortReal: !!(t.msdyn_effort && t.msdyn_effort > 0),
+            effortPerWeek,
+            effortReal,
             progress: Math.round((t.msdyn_progress || 0) * 100),
             c: plan.color,
             deps: (depMap[taskId] || []).map(pid => pid + '_' + resId),
