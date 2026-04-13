@@ -730,27 +730,67 @@ async function graphPatch(url, body, etag) {
 }
 
 async function loadPlannerPlans() {
-  showBanner('info', 'Plans ophalen uit Microsoft Planner...');
+  showBanner('info', 'Plans ophalen...');
+  let loadedViaDataverse = false;
+
+  // Try Dataverse first (Premium plans)
   try {
-    const data = await graphGet('me/planner/plans');
-    allPlans = (data.value || []).map((p, i) => ({
-      id: p.id, name: p.title,
-      color: PROJ_COLORS[i % PROJ_COLORS.length]
-    }));
-    const saved = JSON.parse(localStorage.getItem('planner_selected_plans') || '[]');
-    selectedPlanIds = saved.length ? saved : allPlans.slice(0, 4).map(p => p.id);
+    const dvData = await dvGet('msdyn_projects?$select=msdyn_projectid,msdyn_subject&$filter=statecode eq 0&$orderby=msdyn_subject asc');
+    if (dvData.value && dvData.value.length > 0) {
+      allPlans = dvData.value.map((p, i) => ({
+        id: p.msdyn_projectid,
+        name: p.msdyn_subject,
+        color: PROJ_COLORS[i % PROJ_COLORS.length],
+        source: 'dataverse'
+      }));
+      loadedViaDataverse = true;
+    }
+  } catch(e) {
+    console.warn('Dataverse niet bereikbaar, fallback naar Graph API:', e.message);
+  }
+
+  // Fallback: Graph API for basic plans
+  if (!loadedViaDataverse) {
+    try {
+      const data = await graphGet('me/planner/plans');
+      allPlans = (data.value || []).map((p, i) => ({
+        id: p.id, name: p.title,
+        color: PROJ_COLORS[i % PROJ_COLORS.length],
+        source: 'graph'
+      }));
+    } catch(e) {
+      showBanner('err', 'Plans laden mislukt: ' + e.message);
+      return;
+    }
+  }
+
+  // Validate saved selection against newly loaded plan IDs
+  const saved = JSON.parse(localStorage.getItem('planner_selected_plans') || '[]');
+  const validSaved = saved.filter(id => allPlans.find(p => p.id === id));
+  if (validSaved.length) {
+    selectedPlanIds = validSaved;
     renderPlanList();
     await loadTasksForPlans();
-  } catch(e) {
-    showBanner('err', 'Fout bij laden van plans: ' + e.message);
+  } else {
+    // Saved IDs don't match current plans (e.g. switching from Graph to Dataverse)
+    // Auto-select first 4 and show config modal so user can confirm selection
+    localStorage.removeItem('planner_selected_plans');
+    selectedPlanIds = allPlans.slice(0, 4).map(p => p.id);
+    renderPlanList();
+    hideBanners();
+    showBanner('info', `${allPlans.length} plans geladen via ${loadedViaDataverse ? 'Dataverse (Premium)' : 'Graph API'}. Bevestig je planselectie via "Plans configureren".`);
+    // Auto-load with first 4 so something shows immediately
+    await loadTasksForPlans();
   }
 }
 
 async function loadTasksForPlans() {
   if (!selectedPlanIds.length) { tasks = []; origTasks = []; render(); return; }
-  const dvPlans = allPlans.filter(p => selectedPlanIds.includes(p.id) && p.source === 'dataverse');
+  const dvPlans = allPlans.filter(p => selectedPlanIds.includes(p.id) && p.source !== 'graph');
   const graphPlans = allPlans.filter(p => selectedPlanIds.includes(p.id) && p.source === 'graph');
-  showBanner('info', `Taken ophalen voor ${selectedPlanIds.length} plan(s)...`);
+  const dvPlanCount = allPlans.filter(p => selectedPlanIds.includes(p.id) && p.source === 'dataverse').length;
+  const grPlanCount = allPlans.filter(p => selectedPlanIds.includes(p.id) && p.source === 'graph').length;
+  showBanner('info', `Taken ophalen — ${dvPlanCount > 0 ? dvPlanCount + ' Dataverse' : ''}${grPlanCount > 0 ? ' ' + grPlanCount + ' Graph' : ''} plan(s)...`);
   try {
     const allTasksArr = [];
     const peopleMap = {};
